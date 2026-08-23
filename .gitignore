@@ -1,0 +1,12 @@
+# Local working docs — not part of the public repo
+/CLAUDE.md
+/QWEN.md
+
+# Agent system & AI workflow (local only)
+/.claude/
+/.github/
+
+# Build artifacts
+/build/
+*.iso
+*.o
