@@ -1,0 +1,16 @@
+[package]
+name = "ascc"
+version = "0.1.0"
+edition = "2021"
+description = "Asc compiler — hosted dev tool for the Ascension OS. Rust host, LLVM backend."
+
+[[bin]]
+name = "ascc"
+path = "src/main.rs"
+
+[dependencies]
+inkwell = { version = "0.10", default-features = false, features = ["llvm19-1", "llvm19-1-prefer-dynamic", "target-x86"] }
+llvm-sys = "191"
+
+[profile.release]
+panic = "abort"
