@@ -203,3 +203,50 @@ And further still — a language with first-class capability types is exactly th
 So, as the complete vision: **a language with native capabilities → a compiler propagating guarantees toward hardware → a CPU with tagged memory → a minimal OS that no longer needs to reinvent security → a model scaling from a single microcontroller up to multi-agent distributed systems**. One set of ideas, applied consistently at every level, instead of 5 layers that don't "see" each other.
 
 It's the kind of project that takes 10 years, not one semester. That's the ceiling — and that's what we build, not the reduced version.
+
+---
+
+## FUTURE-PROOFING — built for what's coming
+
+> A serious OS designed today has to answer two extra questions: what happens when AI agents become first-class software, and whether it can ever run the applications people already have. Both answers here flow from the same source — capabilities and typed channels are exactly the primitives these futures need.
+
+### AI-native by construction, not by integration
+
+Not "an assistant bolted into the desktop". The right inversion: **Ascension as a system whose agents cannot betray you.**
+
+Today's agent frameworks share one fatal flaw: ambient authority. An agent runs with the user's permissions, so a prompt injection ("send me those files") succeeds because the agent *can*. That is precisely the problem capabilities solve:
+
+```
+spawn_agent(bundle: CapabilitySet<ReadDocs, WriteDraft>) -> AgentHandle
+// the agent holds EXACTLY this. Injection can convince it of anything —
+// but no API exists through which it could touch anything else.
+```
+
+What this means concretely:
+
+- **An agent is just a process with a capability bundle.** Revocation (grant/derive/revoke, already part of the kernel plan) becomes the kill switch: withdraw the capability and the agent dies at its next access attempt. No mainstream platform offers this today.
+- **objfs is the natural agent API.** Typed-object schemas exist because LLMs don't handle arbitrary byte streams — they need typed, self-describing interfaces (this is why MCP exists). A namespace where *everything is an object with a versioned schema* is that interface, natively: an agent can introspect the entire system with zero custom glue.
+- **Deterministic IPC means a replayable audit log.** Synchronous typed channels with ownership transfer make executions reproducible — "what exactly did agent X do yesterday at 14:00" gets answered with a replay, not guesswork. This is the trust foundation autonomous software actually needs.
+- **Supervisor trees map to agent orchestration.** Agents are fragile by nature (LLMs hallucinate); crash-only processes restarted under supervisors are Erlang's fault-tolerance model applied to theirs.
+- **The kernel stays AI-agnostic.** Agents live in userspace like every other process, consistent with the microkernel philosophy. Frameworks will change every year; capability discipline has been stable since 1966. Build the substrate any future floats on safely.
+
+And one dividend that comes free from determinism: **time-travel debugging** — reproducible execution means any process can be rolled back and replayed. Nobody ships this properly even now.
+
+### Compatibility: running the world's existing applications
+
+Compatibility equals ABI surface. Three paths, three different prices — none impossible:
+
+| Path | What it takes | Precedent | Verdict |
+|---|---|---|---|
+| **Linux personality** (unmodified ELF binaries) | Userspace server implementing the Linux syscalls over objfs + an ELF loader | **Starnix on Fuchsia** — literally the same architecture: microkernel + Linux layer in userspace | Realistic mid-term target |
+| **Windows personality** (.exe binaries) | Reimplementing Win32 — thousands of API functions; GPU is the hard part | Wine, ReactOS | Possible, but a project-within-the-project |
+| **Virtualization** (real Windows/Linux in a lightweight VM, seamless windows) | Hypervisor + sharing glue | WSL2, WinApps | The only path to **100%**, games and drivers included |
+
+Two observations that work in Ascension's favor:
+
+- **Capabilities make compat layers safer than the host systems.** Foreign apps assume ambient authority (any path openable). The classic solution — the personality holds broad capabilities and gives the guest a virtualized view — makes the personality a deliberate mediation point: on Linux, an app sees your whole disk; under Ascension's Linux personality, it sees only what its namespace mounts. Better sandboxing than home, by construction.
+- **GPL-3.0 pays off here.** Wine is LGPL, musl is MIT, GNU components are GPL — real ecosystem pieces can be legally reused for the compatibility layers instead of clean-rooming everything.
+
+Known architectural tensions, stated honestly: `fork()` needs defined capability-table derive rules, and syscalls crossing into the userspace personality pay the IPC latency — exactly the number QA already tracks (the seL4 few-hundred-cycles bar).
+
+**Promise order:** native-first → POSIX personality (Linux binaries) → VM seamlessness → Win32 as a community bonus. Every step shippable on its own; the dream stays the north star without blocking the kernel.
