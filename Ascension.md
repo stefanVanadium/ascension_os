@@ -1,31 +1,31 @@
 # ▲ Ascension — Project Overview
 
-> Acest document are două părți:
-> 1. **Discuția inițială** (arhivată mai jos) — punctul de plecare, un OS clasic, "am făcut și eu un kernel". Depășit. Păstrat doar ca istoric/context, nu ca direcție.
-> 2. **Viziunea** (după discuții) — direcția reală, asta construim. Nu un kernel-toy, ci sistemul complet: capabilities native, canale tipizate, hardware tagged memory, limbaj propriu — de la silicon până la aplicație.
+> This document has two parts:
+> 1. **The initial discussion** (archived below) — the starting point: a classic OS, the "yet another kernel" kind. Superseded. Kept only as history/context, not as direction.
+> 2. **The Vision** (after further discussions) — the real direction; this is what we build. Not a toy kernel, but the complete system: native capabilities, typed channels, hardware tagged memory, our own language — from silicon to application.
 >
-> **Redenumire:** proiectul a pornit ca *IronwoodOS*; numele curent este **Ascension**, iar limbajul propriu se numește **Asc** (extensie `.asc`, compilator `ascc`, shell `embers`). Regulile tehnice de lucru sunt în `CLAUDE.md` / `QWEN.md`; secțiunea arhivată de mai jos păstrează numele vechi ca istorie.
+> **Rename:** the project started as *IronwoodOS*; its current name is **Ascension**, and the in-house language is called **Asc** (extension `.asc`, compiler `ascc`, shell `embers`). The technical working rules live in `CLAUDE.md` / `QWEN.md`; the archived section below keeps the old name as history.
 
 ---
 
-## [ARHIVĂ — depășit] Discuție inițială
+## [ARCHIVE — superseded] Initial discussion
 
-> Tot ce urmează în această secțiune e conceptul de la care s-a plecat, **înainte** de discuțiile care au dus la viziunea reală de mai jos. Nu mai e ținta proiectului — rămâne doar ca notă istorică.
+> Everything that follows in this section is the concept the project started from, **before** the discussions that led to the real vision below. It is no longer the target of the project — it remains only as a historical note.
 
-### Concept initial dar slab
+### Initial but weak concept
 
-IronwoodOS este un sistem de operare construit de la zero, cu filozofia:
-- **Cât mai eficient** — minimalist, rulează și pe hardware vechi
-- **Cât mai modular** — componente clare, bine separate
-- **Cât mai robust** — nu cedează la erori de drivere
-- **Pentru TOTI** — terminal first tho ca totusi e pentru mine, no bloat
+IronwoodOS is an operating system built from scratch, with the philosophy:
+- **As efficient as possible** — minimalistic, runs on old hardware too
+- **As modular as possible** — clear, well-separated components
+- **As robust as possible** — doesn't fall over on driver errors
+- **For EVERYONE** — terminal first though; still, it's for me. No bloat.
 
-### Arhitectură: Hybrid Kernel
+### Architecture: Hybrid Kernel
 
 ```
 ┌─────────────────────────────────────┐
 │           USER SPACE                │
-│  Apps │ Shell │ Drivere non-critice │
+│  Apps │ Shell │ Non-critical drivers│
 ├─────────────────────────────────────┤
 │         KERNEL SPACE (hybrid)       │
 │  ┌─────────────────────────────┐    │
@@ -35,7 +35,7 @@ IronwoodOS este un sistem de operare construit de la zero, cu filozofia:
 │  │  - Memory (paging)          │    │
 │  │  - Interrupts               │    │
 │  ├─────────────────────────────┤    │
-│  │   IN-KERNEL (performanță)   │    │
+│  │   IN-KERNEL (performance)   │    │
 │  │  - Graphics driver          │    │
 │  │  - Storage driver           │    │
 │  │  - Network stack            │    │
@@ -45,161 +45,161 @@ IronwoodOS este un sistem de operare construit de la zero, cu filozofia:
 └─────────────────────────────────────┘
 ```
 
-#### Regula de aur
-> Dacă un driver crapă și poate corupe memorie kernel → **user space**
-> Dacă un driver e pe critical path și latența contează → **kernel space**
+#### The golden rule
+> If a driver crashes and could corrupt kernel memory → **user space**
+> If a driver is on the critical path and latency matters → **kernel space**
 
-### Stack Tehnic (inițial)
+### Tech Stack (initial)
 
-| Componentă | Limbaj |
+| Component | Language |
 |---|---|
 | Bootloader, context switch, GDT/IDT | ASM |
-| Kernel core, drivere critice | C |
-| Shell, userspace apps (opțional, daca aduce vreun beneficiu) | C++ |
+| Kernel core, critical drivers | C |
+| Shell, userspace apps (optional, if it brings any benefit) | C++ |
 
-### Structura Proiectului (inițială)
+### Project Structure (initial)
 
 ```
 ironwood/
 ├── boot/               # Bootloader + ASM entry point
 ├── kernel/
 │   ├── core/           # Scheduler, IPC, memory manager
-│   ├── drivers/        # Drivere critice (in-kernel)
+│   ├── drivers/        # Critical drivers (in-kernel)
 │   └── arch/           # x86-64 specific (GDT, IDT, paging)
 ├── userspace/
-│   ├── shell/          # Terminalul IronwoodOS
-│   └── libs/           # libc minimală
-├── build/              # Output compilat
+│   ├── shell/          # The IronwoodOS terminal
+│   └── libs/           # Minimal libc
+├── build/              # Compiled output
 └── Makefile
 ```
 
-### Roadmap (inițial)
+### Roadmap (initial)
 
-| # | Pas | Status |
+| # | Step | Status |
 |---|---|---|
-| 1 | Bootloader + "Hello from IronwoodOS" pe ecran | ⬜ |
-| 2 | GDT, IDT, interrupts în C | ⬜ |
+| 1 | Bootloader + "Hello from IronwoodOS" on screen | ⬜ |
+| 2 | GDT, IDT, interrupts in C | ⬜ |
 | 3 | Memory management — paging, heap allocator | ⬜ |
-| 4 | Scheduler — procese, multitasking | ⬜ |
-| 5 | VFS — sistem de fișiere abstract | ⬜ |
-| 6 | Driver tastatură + VGA text mode | ⬜ |
+| 4 | Scheduler — processes, multitasking | ⬜ |
+| 5 | VFS — abstract filesystem | ⬜ |
+| 6 | Keyboard driver + VGA text mode | ⬜ |
 | 7 | Terminal / Shell | ⬜ |
 | 8 | Syscall interface | ⬜ |
-| 9 | Userspace + libc minimală | ⬜ |
+| 9 | Userspace + minimal libc | ⬜ |
 
-### Target Hardware (inițial)
+### Target Hardware (initial)
 
-- **Arhitectură:** x86-64
-- **Mediu de test:** QEMU (virtualizat)
-- **Obiectiv final:** rulează pe hardware real, inclusiv PC-uri vechi
+- **Architecture:** x86-64
+- **Test environment:** QEMU (virtualized)
+- **Final goal:** runs on real hardware, including old PCs
 
-#### Tools necesare
-- `qemu-system-x86_64` — pentru testare
+#### Required tools
+- `qemu-system-x86_64` — for testing
 - `x86_64-elf-gcc` — cross-compiler
-- `nasm` sau `gas` — assembler
+- `nasm` or `gas` — assembler
 - `make` — build system
 
-### Filozofie Design (inițială)
+### Design Philosophy (initial)
 
-- **Nu e un Linux clone** — identitate proprie
-- **Terminal first** — UI minimalist, pentru programatori
-- **Modulare în cod** — chiar dacă kernelul e hybrid, codul e structurat clar pe module
-- **Zero bloat** — fiecare linie de cod are un motiv să existe
-- **Scriem noi codu, nu importam 10 librari pentru "Hello world"**
+- **Not a Linux clone** — its own identity
+- **Terminal first** — minimal UI, built for programmers
+- **Modularity in code** — even with a hybrid kernel, code is clearly structured into modules
+- **Zero bloat** — every line of code has a reason to exist
+- **We write our own code, we don't import 10 libraries for "Hello world"**
 
 ---
 
-## VIZIUNE — direcția reală a proiectului
+## THE VISION — the project's real direction
 
-> Asta construim. Nu doar un kernel funcțional, ci sistemul complet, gândit ca un singur organism — de la concept de hardware până la aplicație. Fără compromisuri istorice (Unix pentru mainframe-uri, Windows moștenind DOS). Trei principii: **izolare completă**, **transparență totală**, **compoziționalitate**.
+> This is what we build. Not just a functional kernel, but the complete system, designed as a single organism — from the hardware concept up to the application. No historical compromises (Unix designed for mainframes, Windows inheriting DOS). Three principles: **complete isolation**, **total transparency**, **composability**.
 >
-> Un al patrulea principiu, moștenit direct din conceptul inițial arhivat mai sus și NEnegociabil indiferent cât de mare a crescut viziunea: **eficiență radicală de memorie și spațiu**. Rulează pe cât mai multe mașini, cât mai eficient — cum lucrau inginerii la început, când fiecare byte și fiecare ciclu trebuia să-și justifice locul. Capabilities și typed channels sunt gratuite dacă se pot verifica static și se pot elimina la compilare; dacă nu se pot elimina, costul lor se măsoară, nu se presupune acceptabil. Detalii concrete (targete de codegen, ce se urmărește în QA) sunt în `CLAUDE.md` → "EFFICIENCY & FOOTPRINT".
+> A fourth principle, inherited directly from the initial concept archived above and NON-negotiable no matter how big the vision grew: **radical memory and space efficiency**. Run on as many machines as possible, as efficiently as possible — the way engineers worked at the beginning, when every byte and every cycle had to justify its place. Capabilities and typed channels are free if they can be verified statically and erased at compile time; if they can't be erased, their cost gets measured, never assumed acceptable. Concrete details (codegen targets, what QA tracks) are in `CLAUDE.md` → "EFFICIENCY & FOOTPRINT".
 
-### Kernel: microkernel radical, tip seL4/L4
+### Kernel: radical microkernel, seL4/L4 style
 
-Kernelul propriu-zis ar avea sub 15.000 de linii de cod. Ar face exact patru lucruri:
+The kernel proper would be under 15,000 lines of code. It would do exactly four things:
 
-- **Scheduling** — thread-uri, nimic mai mult
-- **Memory management** — address spaces, pagini, nimic altceva
-- **IPC (inter-process communication)** — sincron, prin canale tipizate
-- **Capabilities** — controlul accesului la orice altă resursă
+- **Scheduling** — threads, nothing more
+- **Memory management** — address spaces, pages, nothing else
+- **IPC (inter-process communication)** — synchronous, over typed channels
+- **Capabilities** — access control for every other resource
 
-Tot restul — drivere de disc, stack de rețea, filesystem, chiar și driverele de placă video — rulează ca procese userspace normale, izolate în address space-uri separate. Dacă un driver de rețea crapă, nu-ți ia tot sistemul cu el, doar restartezi acel proces. Asta e diferența majoră față de Linux, unde un bug într-un driver poate corupe kernelul întreg pentru că totul rulează în același spațiu de adrese privilegiat.
+Everything else — disk drivers, network stack, filesystem, even video card drivers — runs as normal userspace processes, isolated in separate address spaces. If a network driver crashes, it doesn't take the whole system down with it; you just restart that process. That's the major difference from Linux, where a bug in one driver can corrupt the entire kernel because everything runs in the same privileged address space.
 
-Prețul e latența de IPC — un microkernel are overhead mai mare la trecerea mesajelor între procese decât un syscall direct într-un kernel monolitic. Dar seL4 a demonstrat că, cu un design de IPC bine făcut (registre, nu copiere de memorie, batching de mesaje), overhead-ul ăsta poate fi redus la câteva sute de cicli — acceptabil pentru 99% din workload-uri.
+The price is IPC latency — a microkernel has more overhead passing messages between processes than a direct syscall in a monolithic kernel. But seL4 has demonstrated that with well-designed IPC (registers instead of memory copies, message batching), this overhead can be reduced to a few hundred cycles — acceptable for 99% of workloads.
 
-### Model de securitate: capabilities, nu permisiuni
+### Security model: capabilities, not permissions
 
-Uită de user/group/root și de bit-uri rwx. În schimb, fiecare proces pornește cu un set explicit de **capabilities** — practic niște token-uri neforjabile care dau acces la o resursă anume, cu drepturi anume (read, write, execute, delegate). Un proces nu poate face nimic pentru care nu are un capability explicit, nici măcar să afle că o resursă există.
+Forget user/group/root and rwx bits. Instead, every process starts with an explicit set of **capabilities** — essentially unforgeable tokens granting access to a specific resource, with specific rights (read, write, execute, delegate). A process cannot do anything it doesn't hold an explicit capability for — it can't even find out a resource exists.
 
-Practic: browser-ul tău primește capability la un singur socket de rețea și la un director sandbox, punct. Nu poate citi `/home`, nu pentru că i-ai interzis printr-o regulă, ci pentru că fizic nu are cum să adreseze acel fișier — nu există niciun API prin care să ceară acces la ceva ce nu i s-a dat explicit.
+Concretely: your browser gets a capability to exactly one network socket and one sandbox directory, period. It can't read `/home` — not because a rule forbids it, but because it physically has no way to address that file. There is no API through which it can request access to anything it wasn't explicitly given.
 
-Asta elimină o clasă întreagă de vulnerabilități — privilege escalation devine aproape imposibil by design, pentru că nu există "privilegiu ambient" de escaladat.
+This eliminates an entire class of vulnerabilities — privilege escalation becomes nearly impossible by design, because there is no "ambient privilege" left to escalate.
 
-### Modelul de concurență: actors + typed channels
+### Concurrency model: actors + typed channels
 
-Kernelul ar expune primitive de concurență la nivel de canale tipizate (gen Go channels sau Erlang mailboxes), nu thread-uri cu shared memory + locks. Locking manual e sursa a jumătate din bug-urile grele din sisteme concurente (race conditions, deadlocks). Dacă procesele comunică *doar* prin mesaje trimise pe canale, iar canalele sunt tipizate static, o grămadă din bug-urile astea dispar la compilare, nu la runtime.
+The kernel exposes concurrency primitives as typed channels (like Go channels or Erlang mailboxes), not threads with shared memory + locks. Manual locking is the source of half the serious bugs in concurrent systems (race conditions, deadlocks). If processes communicate *only* through messages sent over channels, and those channels are statically typed, a whole pile of these bugs disappears at compile time, not at runtime.
 
-Pentru partea de shared memory (unde ai nevoie de ea, gen buffere mari de date), aș folosi un model de **ownership** inspirat din Rust — memoria transferată printr-un canal își schimbă owner-ul, procesul vechi pierde fizic accesul (unmap), deci nu poți avea două procese care scriu simultan în aceeași pagină din greșeală.
+For the shared-memory part (where you genuinely need it, e.g. large data buffers), I'd use an **ownership** model inspired by Rust — memory transferred through a channel changes owner; the old process physically loses access (unmap), so you can't have two processes accidentally writing to the same page simultaneously.
 
-### Filesystem: totul e un obiect tipizat, nu un fișier
+### Filesystem: everything is a typed object, not a file
 
-Aici m-aș inspira din Plan 9, dar aș merge un pas mai departe. În loc de "totul e un fișier" (un stream de bytes fără structură), aș zice **totul e un obiect cu un schema versionat**. Un proces, o fereastră, o conexiune de rețea, un senzor — toate sunt adresabile printr-un namespace unificat, dar fiecare obiect știe ce tip de date expune (nu doar bytes bruți), iar sistemul poate valida la compile-time sau runtime dacă un consumator "înțelege" schema respectivă.
+Here I'd take inspiration from Plan 9, then go one step further. Instead of "everything is a file" (an unstructured stream of bytes): **everything is an object with a versioned schema**. A process, a window, a network connection, a sensor — all addressable through a unified namespace, but each object knows what type of data it exposes (not just raw bytes), and the system can validate at compile time or runtime whether a consumer "understands" that schema.
 
-Namespace-urile ar fi per-proces, ca în Plan 9 — fiecare proces își vede propriul montaj al lumii, poți face sandboxing trivial doar prin manipularea namespace-ului, fără containere grele gen Docker.
+Namespaces would be per-process, as in Plan 9 — each process sees its own mount of the world; you get trivial sandboxing just by manipulating the namespace, without heavyweight containers à la Docker.
 
-### Determinism și timp real ca opțiune de prim rang
+### Determinism and real time as first-class options
 
-Pentru partea ta de embedded/RTOS, aș vrea ca schedulerul să suporte două moduri, comutabile per-task:
+For the embedded/RTOS side, I'd want the scheduler to support two modes, switchable per task:
 
-- **Best-effort** — scheduler normal, throughput-optimizat
-- **Hard real-time** — task-ul primește garanții formale de worst-case execution time, verificate static (analiză WCET la compilare, nu la runtime)
+- **Best-effort** — normal scheduler, throughput-optimized
+- **Hard real-time** — the task receives formal worst-case execution time guarantees, verified statically (WCET analysis at compile time, not runtime)
 
-Asta ar face sistemul valid atât pentru un laptop cât și pentru un microcontroller care controlează un motor, fără să ai nevoie de două OS-uri complet diferite (cum e azi Linux vs FreeRTOS).
+That would make the system valid both for a laptop and for a microcontroller controlling a motor, without needing two entirely different operating systems (as today's Linux vs FreeRTOS).
 
-### Limbaj de sistem: nu C
+### Systems language: not C
 
-C e motivul pentru care avem 50 de ani de buffer overflows. Aș scrie totul într-un limbaj cu memory safety la compilare (gen Rust, sau ceva mai simplu, custom-făcut pentru kernel-uri — vezi cum a plecat comunitatea seL4 spre verificare formală în Isabelle/HOL). Corectitudinea kernelului ar trebui *dovedită matematic*, nu doar testată — seL4 e singurul kernel general-purpose cu proof formal de corectitudine end-to-end, și cred că ăsta ar trebui să fie standardul, nu excepția.
+C is the reason we have 50 years of buffer overflows. I'd write everything in a language with compile-time memory safety (like Rust, or something simpler, custom-built for kernels — see how the seL4 community went toward formal verification in Isabelle/HOL). Kernel correctness should be *mathematically proven*, not just tested — seL4 is the only general-purpose kernel with an end-to-end formal correctness proof, and I believe that should be the standard, not the exception.
 
-### Boot și update: imutabil și atomic
+### Boot and updates: immutable and atomic
 
-Sistemul de fișiere rădăcină ar fi read-only, tip image-based (gen NixOS sau ChromeOS) — update-urile se aplică atomic, ca o imagine nouă completă, cu rollback instant dacă boot-ul eșuează. Nu mai există stare de "sistem pe jumătate updatat" care să-ți crape mașina la 2 dimineața.
+The root filesystem would be read-only, image-based (like NixOS or ChromeOS) — updates are applied atomically, as one complete new image, with instant rollback if boot fails. No more "half-updated system" state crashing your machine at 2 AM.
 
 ---
 
-Practic, dacă ar trebui să-l numesc: un hibrid între **seL4** (kernel, capabilities, proof formal), **Plan 9** (namespace-uri, "totul e obiect"), **Erlang/BEAM** (concurență prin mesaje, supervizor trees pentru fault tolerance) și **NixOS** (update-uri atomice, imutabilitate).
+In short, if I had to name it: a hybrid between **seL4** (kernel, capabilities, formal proof), **Plan 9** (namespaces, "everything is an object"), **Erlang/BEAM** (message-passing concurrency, supervisor trees for fault tolerance) and **NixOS** (atomic updates, immutability).
 
-### Limbaj propriu — de ce C sau Rust nu sunt suficiente
+### A language of our own — why C or Rust aren't enough
 
-Nu e nebunie — dacă construiești un OS de la zero cu idei proprii de capabilities și namespace-uri, un limbaj generic (C sau Rust) o să te forțeze mereu să "traduci" ideile alea prin abstractizări care nu au fost gândite pentru ele. Un limbaj propriu ar putea exprima nativ conceptele — capability ca prim-cetățean în type system, canale tipizate ca parte din sintaxă, nu bibliotecă adăugată ulterior.
+It's not madness — if you build an OS from zero with your own ideas about capabilities and namespaces, a generic language (C or Rust) will always force you to "translate" those ideas through abstractions that weren't designed for them. A purpose-built language could express the concepts natively — capabilities as first-class citizens of the type system, typed channels as part of the syntax rather than a bolted-on library.
 
-Practic, ce-ar însemna:
+Concretely, what that means:
 
-- **Capabilities ca tipuri, nu ca valori runtime.** Compilatorul ar ști static ce capabilități are o funcție, la fel cum Rust știe static dacă ai `&mut` sau `&`. Ai putea avea o semnătură de genul `fn read_sensor(cap: Capability<SensorRead>) -> Data` unde compilatorul verifică la compile-time că nu poți chema funcția fără capability-ul potrivit, mai degrabă decât runtime check.
-- **Ownership + regiuni, nu garbage collector.** Pentru un kernel n-ai voie GC (latență imprevizibilă), deci ai nevoie de ceva gen Rust borrow-checker, dar simplificat — poate chiar mai strict, cu regiuni de memorie explicite (arena allocation) integrate în sintaxă, nu adăugate ca pattern.
-- **Concurrency prin channels, sintactic, nu prin bibliotecă.** `send`/`recv` ca keyword-uri, nu funcții — compilatorul verifică tipurile mesajelor la compile time, deci un canal typed nu poate primi accidental un mesaj greșit.
+- **Capabilities as types, not runtime values.** The compiler would statically know which capabilities a function requires, the same way Rust statically knows whether you have `&mut` or `&`. You could have a signature like `fn read_sensor(cap: Capability<SensorRead>) -> Data`, where the compiler verifies at compile time that you can't call the function without the right capability — rather than a runtime check.
+- **Ownership + regions, no garbage collector.** For a kernel you can't have GC (unpredictable latency), so you need something like a simplified Rust borrow checker — maybe even stricter, with explicit memory regions (arena allocation) integrated into the syntax, not added as a pattern.
+- **Concurrency through channels, syntactically, not through a library.** `send`/`recv` as keywords, not functions — the compiler verifies message types at compile time, so a typed channel can never accidentally receive the wrong message.
 
-Partea grea: scrisul unui compilator solid (lexer, parser, type checker, code generator pentru ARM/RISC-V) e un proiect masiv de unul singur, separat de OS. Riscul real e să te împrăștii pe trei fronturi (CPU + OS + limbaj) și să nu termini niciunul.
+The hard part: writing a solid compiler (lexer, parser, type checker, code generator) is a massive solo project on its own, separate from the OS. The real risk is spreading yourself across three fronts (CPU + OS + language) and finishing none.
 
-**Ordinea de execuție:** fără C, niciodată — nici măcar "inițial". Compilatorul vine primul: `ascc` v0 e o unealtă host scrisă în Rust, cu LLVM ca backend de codegen (`tools/ascc/`); Rust-ul nu apare niciodată în OS — e doar unealta de dev, exact cum era un cross-compiler clasic. Design-ul limbajului (sintaxă, type system, semantica capabilities) se fixează pe hârtie în faza asta, iar abia când `ascc` compilează un subset minimal de Asc scriem kernelul, direct în Asc. Așa avem baza solidă *și* claritate pe ce vrem de la limbaj, fără să construim compilatorul în gol.
+**Order of execution:** no C, ever — not even "initially". The compiler comes first: `ascc` v0 is a host tool written in Rust with LLVM as the codegen backend (`tools/ascc/`); Rust never appears inside the OS — it's just the dev tool, exactly like a classic cross-compiler. The language design (syntax, type system, capability semantics) gets pinned down on paper during this phase, and only once `ascc` can compile a minimal subset of Asc do we write the kernel, directly in Asc. That way we get both the solid foundation *and* clarity about what we want from the language, without building the compiler in a vacuum.
 
-### Plafonul viziunii — sistemul coerent, de la silicon la aplicație
+### The ceiling of the vision — a coherent system, from silicon to application
 
-Nu doar un OS și un limbaj separate — un **sistem coerent**, gândit ca un singur organism, de la siliciu (concept) până la aplicație. Azi ai straturi complet separate care nu "știu" unul de altul — hardware-ul nu știe nimic de type safety, compilatorul nu știe nimic de scheduler, OS-ul nu știe nimic de intențiile programului. Fiecare strat re-verifică sau re-descoperă ce straturile de dedesubt/deasupra deja știau.
+Not just an OS and a separate language — a **coherent system**, designed as a single organism, from silicon (concept) to application. Today you have completely separate layers that don't "know" about each other — hardware knows nothing about type safety, the compiler knows nothing about the scheduler, the OS knows nothing about the program's intent. Each layer re-verifies or re-discovers what the layers below/above already knew.
 
-Visul: **un singur model de "capabilities" și "types" care traversează tot stack-ul**, de la ISA (instruction set) până la aplicația finală. Practic:
+The dream: **a single model of "capabilities" and "types" spanning the whole stack**, from the ISA (instruction set) to the final application. Concretely:
 
-- **Limbajul** exprimă capabilities și ownership nativ în sintaxă
-- **Compilatorul** generează cod care păstrează garanțiile astea până la nivel de instrucțiuni mașină — nu doar verifică la compilare și apoi "uită", ci emite metadate hardware-verificabile
-- **CPU-ul** (chiar și cel TTL, într-o formă simplificată, ca demonstrație de concept) are suport nativ pentru tagged memory — fiecare cuvânt de memorie poartă un tag mic care spune "asta e un capability, nu poate fi falsificat prin aritmetică pe pointeri". Există precedent — CHERI de la Cambridge face exact asta pe ARM Morello, hardware capabilities la nivel de pointer.
-- **OS-ul** nu mai verifică nimic la runtime pentru că garanțiile vin deja din hardware + compilator
+- **The language** expresses capabilities and ownership natively in its syntax
+- **The compiler** generates code that preserves these guarantees down to machine instructions — not just checks at compile time and then "forgets", but emits hardware-verifiable metadata
+- **The CPU** (even a TTL one, in simplified form, as a proof of concept) has native support for tagged memory — every word of memory carries a small tag saying "this is a capability, it cannot be forged by pointer arithmetic". There's precedent — CHERI from Cambridge does exactly this on ARM Morello: hardware capabilities at the pointer level.
+- **The OS** no longer verifies anything at runtime, because the guarantees already come from hardware + compiler
 
-Asta ar elimina o clasă întreagă de atacuri (buffer overflow, use-after-free, privilege escalation) nu prin patch-uri software, ci pentru că devin **fizic irepresentabile** în sistem.
+This would eliminate an entire class of attacks (buffer overflow, use-after-free, privilege escalation) not through software patches, but because they become **physically unrepresentable** in the system.
 
-**Scalare la sisteme distribuite.** De ce să te oprești la "OS pentru un calculator"? Modelul de capabilities + canale tipizate se scalează natural la sisteme distribuite. Un capability nu trebuie să fie local — poate fi un token care traversează rețeaua, cu aceleași garanții. Practic ai putea avea un sistem unde un proces local și un proces de pe un server la distanță vorbesc prin același model de canale tipizate, cu aceleași garanții de siguranță, fără diferență conceptuală între "local" și "distribuit". E ideea din spatele lui Erlang/BEAM dusă la extrem, combinată cu capabilities.
+**Scaling to distributed systems.** Why stop at "an OS for one computer"? The capabilities + typed-channels model scales naturally to distributed systems. A capability doesn't have to be local — it can be a token traveling across the network, with the same guarantees. You could have a system where a local process and a process on a remote server talk through the same typed-channel model, with the same safety guarantees, no conceptual difference between "local" and "distributed". It's the idea behind Erlang/BEAM taken to the extreme, combined with capabilities.
 
-Și mai departe — un limbaj cu capabilities ca tipuri de prim rang e exact genul de fundație pe care ai vrea-o pentru sisteme unde AI-uri și cod scris de om colaborează direct pe același cod, pentru că poți exprima formal "acest agent AI are exact aceste capabilități, nu mai multe" — verificabil static, nu doar prompt-uri și promisiuni.
+And further still — a language with first-class capability types is exactly the kind of foundation you'd want for systems where AIs and human-written code collaborate directly on the same codebase, because you can formally express "this AI agent has exactly these capabilities, no more" — statically verifiable, not just prompts and promises.
 
-Deci, ca viziune completă: **un limbaj cu capabilities native → compilator care propagă garanțiile spre hardware → CPU cu tagged memory → OS minimal care nu mai are nevoie să reinventeze securitatea → model care se scalează de la un microcontroler până la sisteme distribuite multi-agent**. Un singur set de idei, aplicat consecvent la fiecare nivel, în loc de 5 straturi care nu se "văd" unul pe altul.
+So, as the complete vision: **a language with native capabilities → a compiler propagating guarantees toward hardware → a CPU with tagged memory → a minimal OS that no longer needs to reinvent security → a model scaling from a single microcontroller up to multi-agent distributed systems**. One set of ideas, applied consistently at every level, instead of 5 layers that don't "see" each other.
 
-E genul de proiect de 10 ani, nu de-un semestru. Ăsta e plafonul — și ăsta e ce construim, nu varianta redusă.
+It's the kind of project that takes 10 years, not one semester. That's the ceiling — and that's what we build, not the reduced version.
