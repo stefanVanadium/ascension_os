@@ -1,9 +1,9 @@
 # The Asc Language — Specification v1
 
-> Status: **v1** — extends v0 with multi-unit linking, arrays, address-of,
+> Status: **v1**: extends v0 with multi-unit linking, arrays, address-of,
 > pointer field access, magic source constants, and the size-first kernel profile.
 > Scope discipline: capabilities, channels, regions/arenas and modules are
-> **specified here but not implemented yet** — their semantics below are the
+> **specified here but not implemented yet**; their semantics below are the
 > design contract.
 
 Asc is a systems language for Ascension: capability-based, channel-typed,
@@ -17,11 +17,11 @@ codegen; none of it survives into LLVM IR.
 - Source files: `*.asc`. One file = one compilation unit = one object file.
 - `ascc input.asc --kernel -o out.o` compiles a **kernel-mode unit**:
   - freestanding: no hosted-OS assumptions, no implicit runtime, no implicit heap
-  - no FPU/SSE/MMX target features enabled — no floating point instructions emitted
+  - no FPU/SSE/MMX target features enabled: no floating point instructions emitted
   - no red zone on any function
   - size-first optimization: `optsize` on every function + `default<O2>` pipeline
     with loop/SLP vectorization disabled and MergeFunctions enabled (`-Os` parity;
-    LLVM 19's C API cannot set SizeLevel directly — revisit on LLVM 20+)
+    LLVM 19's C API cannot set SizeLevel directly; revisit on LLVM 20+)
   - large/kernel code model (higher-half linking at `0xFFFFFFFF80100000`)
 - Without `--kernel`, defaults are still static/freestanding; only the target-feature
   restrictions differ. There is no hosted stdlib in any mode.
@@ -29,7 +29,7 @@ codegen; none of it survives into LLVM IR.
   symbol `kmain` verbatim).
 - **Cross-unit linking**: a bodyless function declaration (`fn f(...) -> T;`) is an
   external symbol reference resolved by the linker. Signatures are NOT verified across
-  units (the linker sees only symbol names) — declarations are trusted, same trust
+  units (the linker sees only symbol names): declarations are trusted, same trust
   model as C headers. Nominal types that cross units must be redeclared identically
   in each unit; they erase to identical LLVM types, so the linked program agrees.
 - Inline asm templates: literal AT&T immediates need `$$` (`$N` is operand
@@ -72,7 +72,7 @@ type Paddr = distinct u64    // new nominal type; NOT implicitly convertible
 type Vaddr = distinct u64    // Paddr and Vaddr are unrelated types
 ```
 - A distinct type is constructed explicitly: `Paddr(expr_of_u64)`.
-- It is unwrapped explicitly: `u64(p)` — allowed only back to its exact base type.
+- It is unwrapped explicitly: `u64(p)`, allowed only back to its exact base type.
 - No arithmetic, comparison, or assignment between distinct types or between a
   distinct type and its base without these explicit conversions. Violation =
   hard compile error.
@@ -104,7 +104,7 @@ let buf2: [N]u8;              // length may be a named const
 ```
 - Value semantics: arrays are Copy; assignment copies.
 - Decay: where a `*T`/`*const T` is expected (arguments, assignments, returns),
-  a `[N]T` decays to a pointer to element 0 — codegen emits the address, not a load.
+  a `[N]T` decays to a pointer to element 0; codegen emits the address, not a load.
 - v1 restrictions: no array-of-array nesting; arrays cannot be parameter or return
   types (pass pointers); bounds are NOT checked (kernel discipline + reentrancy-critical
   paths like panic must not fault-check).
@@ -117,7 +117,7 @@ struct TaskControlBlock {
 }
 
 #[packed]
-struct GDTPointer {          // no padding — hardware structs are always packed
+struct GDTPointer {          // no padding: hardware structs are always packed
     limit: u16,
     base: u64,
 }
@@ -157,7 +157,7 @@ fn kmain() -> never {        // never returns: halt loop at the end
   syntax in v0/v1.
 - A `-> never` function's body must not return. Callers may use a call to a never
   function in statement position freely; control flow after it is unreachable.
-- Arrays cannot be parameter or return types — pass pointers.
+- Arrays cannot be parameter or return types; pass pointers.
 
 ## 5. Statements and expressions
 
@@ -167,7 +167,7 @@ let y = x + 1;               // inferred
 let msg: *volatile u16 = phys_to_virt(VGA_TEXT_PADDR) as *volatile u16;
 x = y;                       // assignment (all v0 types are Copy)
 
-if x > 10 { } else { }       // braces mandatory, no truthiness — condition is bool
+if x > 10 { } else { }       // braces mandatory, no truthiness: condition is bool
 while running { }            // braces mandatory
 
 return;                      // void functions
@@ -214,18 +214,18 @@ string literal passed verbatim (AT&T dialect). Constraints follow LLVM/GCC inlin
 asm conventions. Volatile-by-default (side effects must not be optimized away).
 The asm block is a statement; outputs bind to pre-declared locals.
 
-## 7. Ownership & moves (design contract — minimal checker lands Wave 1)
+## 7. Ownership & moves (design contract, minimal checker lands Wave 1)
 
 - Every value is either `Copy` or owned-and-movable. v0 primitives, pointers,
   distinct types, and structs are `Copy`.
 - Minimal rule implemented in v0: a moved binding may not be used afterwards.
-  With all-v0 types being Copy this never fires yet — the checking infrastructure
+  With all-v0 types being Copy this never fires yet; the checking infrastructure
   exists so Phase 1 types (buffers, channels, capabilities) plug in without
   redesign.
 - Future (not in v0): move-on-send across `chan<T>` invalidates the sender's
   mapping (enforced with kernel cooperation), no aliased mutation.
 
-## 8. Capabilities (design contract — NOT implemented in v0)
+## 8. Capabilities (design contract, not implemented yet)
 
 ```
 Capability<T>            // unforgeable token type; no constructor callable from user code
@@ -239,7 +239,7 @@ fn read_sensor(cap: Capability<SensorRead>) -> Data
   proof), it erases to zero bytes. Runtime table entries exist only for
   revocable capabilities (kernel policy decision, cost measured, never assumed free).
 
-## 9. Channels (design contract — NOT implemented in v0)
+## 9. Channels (design contract, not implemented yet)
 
 ```
 chan<Message>            // language primitive, statically payload-typed
@@ -252,8 +252,8 @@ let m = recv(ch);
 
 ## 10. Error policy
 
-Any violation of this spec — type mismatches, distinct-type confusion, missing
-capabilities (once implemented), bad asm constraints — is a **hard compile error**
+Any violation of this spec (type mismatches, distinct-type confusion, missing
+capabilities once implemented, bad asm constraints) is a **hard compile error**
 with file:line:col. Warnings are reserved for style; correctness rules never
 downgrade to warnings.
 
@@ -267,7 +267,7 @@ regions & arena syntax · WCET annotations · self-hosting.
 
 ## 12. Test suite
 
-`tools/ascc/tests/` — `pos/*.asc` must compile clean under `--kernel`,
+`tools/ascc/tests/`: `pos/*.asc` must compile clean under `--kernel`,
 `neg/*.asc` must be rejected with a hard error; `run.sh` runs both plus a
 cross-unit link check (`ld -r` + `nm`) and exits nonzero on any surprise.
 `// EXPECT-UNDEF: <sym>` comments in positive files assert symbols the object
