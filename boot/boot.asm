@@ -1,4 +1,4 @@
-; Ascension — boot entry (Phase 0)
+; Ascension: boot entry (Phase 0)
 ; Multiboot2 header + protected-mode entry + long mode transition +
 ; higher-half jump. This file is on the irreducible-ASM list: it runs
 ; before any language runtime exists.
@@ -65,7 +65,7 @@ gdt_descriptor_high:                          ; used after the higher-half jump
     dw gdt_end - gdt_start - 1
     dq gdt_start
 
-; progress markers on COM1 — the only output that works before Asc runs
+; progress markers on COM1: the only output that works before Asc runs
 boot_msg_magic:  db "BOOT: multiboot2 magic ok", 13, 10, 0
 boot_msg_paging: db "BOOT: page tables set", 13, 10, 0
 boot_msg_long:   db "BOOT: long mode entered", 13, 10, 0
@@ -145,7 +145,7 @@ _start:
     call serial_puts32
 
     ; far jump into the 64-bit code segment. Target must be the PHYSICAL
-    ; address of the entry label (paging is on, identity map holds) — a
+    ; address of the entry label (paging is on, identity map holds): a
     ; ptr16:32 far jump can only carry a 32-bit offset, so the linked virtual
     ; form would not fit.
     jmp GDT_CODE_SEL:long_mode_entry_phys - KERNEL_VIRT_BASE
@@ -168,7 +168,7 @@ long_mode_entry:
 
     ; reload GDT from its VIRTUAL descriptor. CS keeps its hidden descriptor
     ; from the far jump above (same GDT layout), so no second far jump is
-    ; needed — and a ptr16:32 jump could not reach higher-half anyway.
+    ; needed, and a ptr16:32 jump could not reach higher-half anyway.
     lgdt [rel gdt_descriptor_high]
 
     ; jump to the linked (higher-half virtual) address
@@ -196,7 +196,7 @@ higher_half:
     jmp higher_half
 
 ; ---------------------------------------------------------------------------
-; Minimal 16550 UART output — BOOT-domain debug evidence only.
+; Minimal 16550 UART output: BOOT-domain debug evidence only.
 ; Port I/O is address-independent, so the init/putc helpers work identically
 ; in both modes; only the string walkers differ (stack width, pointer size).
 ; ---------------------------------------------------------------------------

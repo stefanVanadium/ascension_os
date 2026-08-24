@@ -1,4 +1,4 @@
-//! ascc — the Asc compiler driver.
+//! ascc: the Asc compiler driver.
 //!
 //! Usage:
 //!   ascc input.asc -o output.o [--kernel] [--emit ir]

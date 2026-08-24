@@ -25,7 +25,7 @@ No C anywhere in kernel or userspace. No ambient authority. No bloat.
 | **Zero ambient authority** | If it's not in the function signature (`Capability<T>`), it's not reachable |
 | **Radical efficiency** | Every byte and every cycle must earn its place. Size regressions fail QA like functional ones |
 
-## Asc — the language that makes the OS possible
+## Asc: the language that makes the OS possible
 
 `Capability<T>`, `chan<T>`, ownership and explicit memory regions aren't libraries bolted onto a
 generic language; they're primitives of Asc's type system:
@@ -48,21 +48,21 @@ it never ships with the OS. Self-hosting is a long-term goal.
 ## Kernel architecture
 
 ```
-┌─────────────────────────────────────────┐
-│                USER SPACE                │
-│ embers shell · apps · MOST drivers (vga, │  ← Asc, capability-scoped,
-│  keyboard, pci, net, storage, fs impl)  │    isolated address spaces
-├─────────────────────────────────────────┤
-│         KERNEL SPACE (microkernel)      │
-│   Scheduling · Memory · IPC · Capabilities
-│                                         │
-│   IN-KERNEL BY EXCEPTION ONLY           │
-│   Serial (guaranteed panic output) · PIT│
-├─────────────────────────────────────────┤
-│      CPU ARCH LAYER (x86_64) + LIBK     │
-├─────────────────────────────────────────┤
-│                 HARDWARE                │
-└─────────────────────────────────────────┘
+┌───────────────────────────────────────────┐
+│                 USER SPACE                │
+│ embers shell · apps · MOST drivers (vga,  │  ← Asc, capability-scoped,
+│  keyboard, pci, net, storage, fs impl)    │    isolated address spaces
+├───────────────────────────────────────────┤
+│          KERNEL SPACE (microkernel)       │
+│  Scheduling · Memory · IPC · Capabilities │
+│                                           │
+│         IN-KERNEL BY EXCEPTION ONLY       │
+│   Serial (guaranteed panic output) · PIT  │
+├───────────────────────────────────────────┤
+│       CPU ARCH LAYER (x86_64) + LIBK      │
+├───────────────────────────────────────────┤
+│                  HARDWARE                 │
+└───────────────────────────────────────────┘
 ```
 
 Only two drivers live in-kernel, by exception: **serial** (panic output must survive a dead

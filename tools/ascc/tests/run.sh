@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ascc test runner — positive cases must compile clean (kernel profile),
+# ascc test runner: positive cases must compile clean (kernel profile),
 # negative cases must FAIL at some stage. Exits nonzero on any surprise.
 #
 #   ./run.sh              # uses ../target/release/ascc

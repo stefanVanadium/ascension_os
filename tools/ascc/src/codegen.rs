@@ -1,4 +1,4 @@
-//! Asc codegen — lowers the type-checked AST to LLVM IR via inkwell.
+//! Asc codegen: lowers the type-checked AST to LLVM IR via inkwell.
 //!
 //! All Asc-level guarantees (distinct types, literal narrowing, capability and
 //! channel rules once they exist) are ERASED here: LLVM sees plain data and
@@ -7,7 +7,7 @@
 //! Kernel-mode target configuration (CLAUDE.md "STACK" guarantees):
 //! - freestanding triple `x86_64-unknown-none-elf`, no runtime, no implicit heap
 //! - no red zone on every function (enum attribute)
-//! - SSE/MMX/AVX target features disabled — no FPU instructions emitted
+//! - SSE/MMX/AVX target features disabled: no FPU instructions emitted
 //!   (Asc has no float literals at all; this is defense in depth)
 //! - kernel code model (top-2GiB addressing for higher-half linking)
 //! - static relocation
@@ -271,7 +271,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             Ty::U64 | Ty::I64 => self.ctx.i64_type().into(),
             Ty::Bool => self.ctx.bool_type().into(),
             Ty::Pointer { .. } => self.ctx.ptr_type(AddressSpace::default()).into(),
-            // Distinct types erase to their base — zero-cost by construction.
+            // Distinct types erase to their base: zero-cost by construction.
             Ty::Distinct { base, .. } => self.llvm_type(base)?,
             Ty::Struct(idx) => self.struct_llt(*idx)?,
             Ty::Array { elem, len } => match self.llvm_type(elem)? {
@@ -408,7 +408,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
     // ---- functions ---------------------------------------------------------
 
     fn apply_kernel_attrs(&self, f: FunctionValue<'ctx>) {
-        // LangRef spelling is `noredzone` — the hyphenated form does not resolve
+        // LangRef spelling is `noredzone`: the hyphenated form does not resolve
         let kind = unsafe {
             let cname = b"noredzone\0";
             LLVMGetEnumAttributeKindForName(cname.as_ptr().cast(), (cname.len() - 1) as usize)
@@ -930,7 +930,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 }
             }
             Expr::Unary { op, expr, .. } => {
-                // address-of never loads — it produces the lvalue's slot/GEP
+                // address-of never loads: it produces the lvalue's slot/GEP
                 if *op == UnaryOp::AddrOf {
                     return Ok(Some(self.gen_lvalue_addr(expr)?.into()));
                 }
@@ -1230,7 +1230,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
 
         // constraint string: outputs, then inputs, then ~clobbers
         // Generic x86 register-class constraints (a/b/c/d/S/D) are expanded to
-        // explicit registers ({ax}, {bl}, ...) sized by the operand's width —
+        // explicit registers ({ax}, {bl}, ...) sized by the operand's width;
         // this is what clang emits anyway, and some LLVM builds mis-handle the
         // class form ("couldn't allocate input reg").
         let mut constraints: Vec<String> = Vec::new();
@@ -1309,7 +1309,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 template.len(),
                 cons_c.as_ptr(),
                 constraint_str.len(),
-                1, // has side effects — always volatile per spec §6
+                1, // has side effects: always volatile per spec §6
                 0, // no special stack alignment
                 LLVMInlineAsmDialect::LLVMInlineAsmDialectATT,
                 0, // cannot throw
@@ -1327,7 +1327,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             )
         };
 
-        // store returned value into the output binding — its Asc type decides
+        // store returned value into the output binding: its Asc type decides
         // which value wrapper to materialize
         if let Some(out) = block.outputs.first() {
             let slot = *self.locals.get(&out.binding).unwrap();
@@ -1474,6 +1474,6 @@ fn expand_constraint(c: &str, bits: u32) -> String {
         }
     }
 
-    // not a register-class constraint — restore original text
+    // not a register-class constraint: restore original text
     c.to_string()
 }

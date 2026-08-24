@@ -1,4 +1,4 @@
-//! Asc lexer — turns `.asc` source into a flat token stream with spans.
+//! Asc lexer: turns `.asc` source into a flat token stream with spans.
 //!
 //! No recovery, no heuristics: a lexical error is reported with file:line:col
 //! and compilation stops. Correctness rules never downgrade to warnings.
@@ -230,7 +230,7 @@ pub fn lex(source: &str, filename: &str) -> Result<Vec<Token>, LexError> {
                 "i16" => TokKind::I16,
                 "i32" => TokKind::I32,
                 "i64" => TokKind::I64,
-                // magic constants — expand immediately from lexer state:
+                // magic constants: expand immediately from lexer state:
                 // __FILE__ is the command-line path, __LINE__ the current line
                 "__FILE__" => {
                     tokens.push(Token {

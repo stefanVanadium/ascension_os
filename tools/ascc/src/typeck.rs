@@ -1,4 +1,4 @@
-//! Asc type checker — enforces the correctness rules before codegen:
+//! Asc type checker: enforces the correctness rules before codegen:
 //!
 //! - nominal `distinct` types with NO implicit conversions (hard errors)
 //! - explicit-only conversions (`Vaddr(x)` wrap, `u64(p)` unwrap, `as` casts
@@ -261,7 +261,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
         }
     }
 
-    // Pass 4: function signatures — definitions AND bodyless declarations.
+    // Pass 4: function signatures: definitions AND bodyless declarations.
     // A prototype and a definition of the same name must agree exactly; two
     // definitions or two prototypes are duplicates.
     for decl in &module.decls {
@@ -702,7 +702,7 @@ impl<'a> FnChecker<'a> {
                 if self.in_never_fn {
                     return Err(terr(
                         *span,
-                        "`return` inside a `-> never` function is forbidden — it cannot return",
+                        "`return` inside a `-> never` function is forbidden: it cannot return",
                     ));
                 }
                 let expected = self.fn_ret.clone();
@@ -1109,7 +1109,7 @@ impl<'a> FnChecker<'a> {
 
     /// Arithmetic/comparison discipline: both sides end up the SAME integer
     /// primitive type. Unsuffixed literals adapt to the other side. Distinct
-    /// types are rejected BY DESIGN — they must be unwrapped explicitly first
+    /// types are rejected BY DESIGN: they must be unwrapped explicitly first
     /// (this is rule #3 of CLAUDE.md enforced at compile time).
     fn common_int_or_error(
         &mut self,
@@ -1142,7 +1142,7 @@ impl<'a> FnChecker<'a> {
             return Err(terr(
                 span,
                 format!(
-                    "operand types differ: `{}` vs `{}` — no implicit widening/narrowing between integer widths",
+                    "operand types differ: `{}` vs `{}`: no implicit widening/narrowing between integer widths",
                     lt.display(),
                     rt.display()
                 ),
@@ -1197,7 +1197,7 @@ fn reject_distinct_operand(t: &Ty, e: &Expr) -> TResult<()> {
         Err(terr(
             expr_span(e),
             format!(
-                "distinct type `{}` does not participate in arithmetic/comparison — unwrap it explicitly first, e.g. `u64({})`",
+                "distinct type `{}` does not participate in arithmetic/comparison: unwrap it explicitly first, e.g. `u64({})`",
                 name,
                 expr_text(e)
             ),
@@ -1271,7 +1271,7 @@ fn ensure_lvalue(target: &Expr) -> TResult<()> {
 }
 
 /// Cast legality matrix (spec §5): pointer↔pointer, integer↔integer,
-/// integer↔pointer — always explicit-only. Anything touching a distinct type
+/// integer↔pointer: always explicit-only. Anything touching a distinct type
 /// MUST go through constructor/unwrap calls instead; `x as Paddr` is a hard
 /// error so there is exactly one blessed conversion syntax per direction.
 fn check_cast(src: &Ty, dst: &Ty, span: Span) -> TResult<()> {
@@ -1280,7 +1280,7 @@ fn check_cast(src: &Ty, dst: &Ty, span: Span) -> TResult<()> {
             return Err(terr(
                 span,
                 format!(
-                    "`as` cannot touch distinct type `{name}` — construct/unwrap explicitly ({name}(x) / u64(x))"
+                    "`as` cannot touch distinct type `{name}`: construct/unwrap explicitly ({name}(x) / u64(x))"
                 ),
             ));
         }

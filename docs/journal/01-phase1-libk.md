@@ -1,4 +1,4 @@
-# Phase 1 — LIBK: types, panic, spinlock (and the language they needed)
+# Phase 1: LIBK, meaning types, panic, spinlock (and the language they needed)
 
 > Sprint: Faza 1 (LANG+BLD → LIBK → QA → CR → DOCS) · Completed: 2026-08-24
 > Deliverable: `kernel/libk/` is real. Distinct address types with conversions,

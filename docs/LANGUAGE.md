@@ -1,4 +1,4 @@
-# The Asc Language — Specification v1
+# The Asc Language, spec v1
 
 > Status: **v1**: extends v0 with multi-unit linking, arrays, address-of,
 > pointer field access, magic source constants, and the size-first kernel profile.
@@ -44,7 +44,7 @@ codegen; none of it survives into LLVM IR.
 - Integer literals: decimal (`123`), hex (`0x3F8`). Type inference from context;
   unsuffixed literals default to `u64` and are implicitly narrowed to any integer
   type when in range (literals are the one implicit numeric conversion).
-- Character literals: `'A'`, `'\n'`, `'\\'`, `'\''`, `'\0'` — typed `u8`.
+- Character literals: `'A'`, `'\n'`, `'\\'`, `'\''`, `'\0'`, all typed `u8`.
 - String literals: `"...\n"` with escapes `\n \t \r \\ \" \' \0`. A string literal
   expression has type `*const u8` and denotes an anonymous NUL-terminated constant
   in `.rodata`.
@@ -59,11 +59,11 @@ codegen; none of it survives into LLVM IR.
 
 ### Primitives
 ```
-u8 u16 u32 u64   — unsigned integers
-i8 i16 i32 i64   — signed integers
-bool             — true / false
-void             — only valid as a function return type (no value)
-never            — function never returns (kmain, panic); any expression may follow it
+u8 u16 u32 u64    unsigned integers
+i8 i16 i32 i64    signed integers
+bool              true / false
+void              only valid as a function return type (no value)
+never             function never returns (kmain, panic); any expression may follow it
 ```
 
 ### Distinct nominal types

@@ -1,4 +1,4 @@
-//! Asc AST — the shape the parser produces and every later stage consumes.
+//! Asc AST: the shape the parser produces and every later stage consumes.
 
 use crate::lexer::Span;
 
@@ -34,7 +34,7 @@ pub enum Decl {
         params: Vec<Param>,
         body: Block,
     },
-    /// Bodyless function declaration: `fn f(...) -> T;` — an extern symbol.
+    /// Bodyless function declaration (`fn f(...) -> T;`): an extern symbol.
     /// No definition is emitted; the linker resolves it against another unit.
     FnProto {
         name: String,
@@ -65,7 +65,7 @@ pub enum TypeExpr {
         volatile: bool,
         span: Span,
     },
-    /// `[N]T` — fixed-size value array. `len` is a compile-time integer
+    /// `[N]T`: fixed-size value array. `len` is a compile-time integer
     /// expression (literal or const reference). No nesting in v1.
     Array {
         len: Box<Expr>,
@@ -170,7 +170,7 @@ pub enum Expr {
 pub enum UnaryOp {
     Neg,
     Not,
-    /// `&expr` — address-of an lvalue; result is `*mut T`.
+    /// `&expr`: address-of an lvalue; result is `*mut T`.
     AddrOf,
 }
 

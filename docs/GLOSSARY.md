@@ -1,4 +1,4 @@
-# Ascension — Glossary
+# Ascension: Glossary
 
 First terms, defined as we use them in this project. Kernel-edge vocabulary grows
 with every phase; entries link to the doc that owns the concept.

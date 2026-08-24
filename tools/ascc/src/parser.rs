@@ -1,4 +1,4 @@
-//! Asc parser — recursive descent with a Pratt loop for binary expressions.
+//! Asc parser: recursive descent with a Pratt loop for binary expressions.
 //!
 //! Produces the AST in `ast.rs`. Fails fast on the first syntax error with a
 //! file:line:col diagnostic; there is no error recovery in v0.
@@ -18,7 +18,7 @@ struct Parser {
     pos: usize,
 }
 
-/// Binary operator precedence — higher binds tighter. Mirrors spec §5 + C-style
+/// Binary operator precedence: higher binds tighter. Mirrors spec §5 + C-style
 /// bitwise placement.
 fn binop_precedence(kind: &TokKind) -> Option<u8> {
     Some(match kind {
@@ -119,7 +119,7 @@ impl Parser {
     // ---- declarations -------------------------------------------------
 
     fn parse_decl(&mut self) -> PResult<Decl> {
-        // #[packed] struct ... — the only attribute in v0
+        // #[packed] struct ...: the only attribute in v0
         let mut packed = false;
         if self.peek().map(|t| t.kind == TokKind::Hash).unwrap_or(false) {
             self.advance();
@@ -179,7 +179,7 @@ impl Parser {
             self.expect(TokKind::Colon, "`:` after field name")?;
             let fty = self.parse_type()?;
             fields.push(StructField { name: fname, ty: fty });
-            // trailing comma optional — a missing comma must mean `}` next
+            // trailing comma optional: a missing comma must mean `}` next
             if !self.eat(TokKind::Comma) {
                 self.expect(TokKind::RBrace, "`}` or `,` after field")?;
                 break;
@@ -269,7 +269,7 @@ impl Parser {
     fn parse_type(&mut self) -> PResult<TypeExpr> {
         let span = self.peek().map(|t| t.span).unwrap_or(Span { line: 0, col: 0 });
         if self.eat(TokKind::LBracket) {
-            // [N]T — N is a const-evaluable integer expression; parse_expr
+            // [N]T: N is a const-evaluable integer expression; parse_expr
             // stops naturally at `]` (not an operator).
             let len = self.parse_expr(0)?;
             self.expect(TokKind::RBracket, "`]` to close array length")?;
@@ -277,7 +277,7 @@ impl Parser {
             return Ok(TypeExpr::Array { len: Box::new(len), elem, span });
         }
         if self.eat(TokKind::Star) {
-            // *const T / *volatile T / both — `const` is documentation-only in
+            // *const T / *volatile T / both: `const` is documentation-only in
             // v0 (no enforcement of writes through it yet)
             let _read_only = self.eat(TokKind::Const);
             let volatile = self.eat(TokKind::Volatile);
@@ -381,7 +381,7 @@ impl Parser {
             return Ok(Stmt::Asm(self.parse_asm()?));
         }
 
-        // assignment or expression statement — parse an expression; if followed by
+        // assignment or expression statement: parse an expression; if followed by
         // `=`, it was an lvalue target.
         let expr = self.parse_expr(0)?;
         if self.eat(TokKind::Assign) {
@@ -558,7 +558,7 @@ impl Parser {
                 span,
             });
         }
-        // prefix `&` — binary `&` (BitAnd) is only reachable between operands,
+        // prefix `&`: binary `&` (BitAnd) is only reachable between operands,
         // so an Amp in unary position is unambiguously address-of
         if self.eat(TokKind::Amp) {
             let inner = self.parse_unary()?;

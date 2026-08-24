@@ -1,4 +1,4 @@
-# Local working docs — not part of the public repo
+# Local working docs: not part of the public repo
 /CLAUDE.md
 /QWEN.md
 /semne-ai.md
@@ -6,6 +6,7 @@
 # Agent system & AI workflow (local only)
 /.claude/
 /.github/
+/.opencode/command/
 
 # Build artifacts
 /build/

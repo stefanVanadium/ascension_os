@@ -1,5 +1,5 @@
 /*
- * Ascension — kernel link script (Phase 0)
+ * Ascension: kernel link script (Phase 0)
  *
  * The kernel is linked to run in the higher half at 0xFFFFFFFF80000000 + 1 MiB,
  * while GRUB loads it at physical 0x100000. AT(ADDR(...) - KERNEL_PHYS_OFF)

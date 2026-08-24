@@ -1,4 +1,4 @@
-# Phase 0 — the Asc compiler and the first boot
+# Phase 0: the Asc compiler and the first boot
 
 > Sprint: Faza 0 (LANG → BOOT → BLD → integration → QA) · Completed: 2026-08-24
 > Deliverable: a bootable ISO whose kernel entry is written in **Asc**, compiled by
@@ -23,7 +23,7 @@ Makefile               ascc -> kernel.o + boot.o -> ELF -> grub-mkrescue ISO -> 
 The compiler is a dev-machine tool, never part of the OS. Hand-writing an x86_64
 instruction selector or register allocator is a multi-year detour; LLVM already
 solves it. Rust gives us sum types and exhaustive matching for the AST work.
-Everything Asc-specific — distinct types, capability/channel rules once they exist —
+Everything Asc-specific (distinct types, capability/channel rules once they exist)
 lives in `typeck.rs` and is **erased before codegen**, exactly like Rust erases the
 borrow checker before LLVM sees IR.
 
@@ -37,11 +37,11 @@ fn inb(port: u16) -> u8 {
 }
 ```
 
-1. **lex** — keywords, spans (`file:line:col` carried everywhere)
-2. **parse** — `Stmt::Asm` with template string + constraint operands
-3. **typeck** — output binding `ret` must be a declared local; inputs type-checked;
+1. lex: keywords, spans (`file:line:col` carried everywhere)
+2. parse: `Stmt::Asm` with template string + constraint operands
+3. typeck: output binding `ret` must be a declared local; inputs type-checked;
    every expression's resolved Ty recorded into an address-keyed map for codegen
-4. **codegen** — GCC template `%0` translated to LLVM `$0`; register-class
+4. codegen: GCC template `%0` translated to LLVM `$0`; register-class
    constraints expanded to explicit registers sized by operand width
    (`"a"` on u16 → `{ax}`); `LLVMGetInlineAsm` + `LLVMBuildCall2` build the call;
    result stored into the local's alloca
@@ -63,7 +63,7 @@ inb:
 | no FPU/SSE | target features `-mmx,-sse,...,-x87`; language has NO float literals at all | `objdump -d \| grep xmm` → 0 hits |
 | higher-half linking | kernel code model + static reloc + `linker.ld` | ELF entry `0xffffffff80100020`, PhysAddr `0x100000` |
 | distinct types | typeck rejects arithmetic/casts across distinct types | negative tests all hard-error |
-| no ambient anything | nothing global is reachable without declaration (trivially true in v0; capabilities come later) | — |
+| no ambient anything | nothing global is reachable without declaration (trivially true in v0; capabilities come later) | n/a |
 
 Known limitation, tracked: inkwell exposes codegen opt levels 0–3 but not
 SizeLevel, so `--kernel` uses OptLevel 1 as the closest size-first profile.
@@ -71,22 +71,22 @@ A custom pass pipeline with SizeLevel=1 is a Phase 1 item.
 
 ## Debugging war stories (what actually bit)
 
-1. **inkwell needs newer Rust than Debian ships.** Debian's rustc 1.85 rejected
+1. inkwell needs newer Rust than Debian ships. Debian's rustc 1.85 rejected
    inkwell 0.10's let-chains → rustup stable (1.98), user-level install.
-2. **Debian ships no static libPolly** → link libLLVM dynamically
+2. Debian ships no static libPolly, so link libLLVM dynamically
    (`llvm19-1-prefer-dynamic` feature).
-3. **`noredzone`, not `no-red-zone`.** The hyphenated spelling silently resolves to
+3. `noredzone`, not `no-red-zone`. The hyphenated spelling silently resolves to
    attribute kind 0, which poisons the module and segfaults `verify()` at emission
    time. Found by isolating emission stages, then confirming via ctypes against
    `libLLVM-19.so` that only the unhyphenated name resolves.
-4. **Generic constraints broken in Debian's llc-19**: `"a"` fails with "couldn't
-   allocate input reg"; explicit `"{ax}"` works — clang expands classes anyway, so
+4. Generic constraints broken in Debian's llc-19: `"a"` fails with "couldn't
+   allocate input reg"; explicit `"{ax}"` works, since clang expands classes anyway, so
    ascc does the same, sized by operand width.
-5. **NASM can't OR constants into relocations** — page-table entries get their flag
+5. NASM can't OR constants into relocations: page-table entries get their flag
    bits OR-ed in at runtime instead of assembly time.
-6. **The final bug was mine, not the toolchain's**: `kmain`'s UART poll read
+6. The final bug was mine, not the toolchain's: `kmain`'s UART poll read
    `0x3F8` (data port) instead of `0x3FD` (LSR). QEMU monitor `info registers`
-   showed RIP parked in `inb` with RDI=0x3F8 — one look, one-line fix.
+   showed RIP parked in `inb` with RDI=0x3F8; one look, one-line fix.
 
 ## QA evidence
 
@@ -117,7 +117,7 @@ if f(1) (bool param)   -> type mismatch: expected `bool`, found `u64`
 
 ## What comes next (Phase 1: LIBK wave)
 
-- types.asc (Paddr/Vaddr/Capability<T>/chan<T> skeletons), panic.asc, spinlock.asc — in Asc
+- types.asc (Paddr/Vaddr/Capability<T>/chan<T> skeletons), panic.asc, spinlock.asc, all in Asc
 - ascc: ownership/move checking beyond the Copy-everything v0, Capability<T> +
   chan<T> checking, size-first pass pipeline (SizeLevel=1)
 - then BOOT+ARCH wave: real GDT/TSS/IDT replacing the bootstrap GDT

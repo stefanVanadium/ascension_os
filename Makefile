@@ -1,4 +1,4 @@
-# Ascension — build system
+# Ascension: build system
 #
 #   make / make all    -> bootable ascension.iso
 #   make ascc          -> Asc compiler (host tool; Rust + LLVM)
@@ -27,7 +27,7 @@ QEMU_FLAGS := -serial stdio -display none -no-reboot
 #
 # Discovery is automatic: every .asc under kernel/ compiles to a mirrored path
 # under build/ (e.g. kernel/libk/types.asc -> build/kernel/libk/types.o).
-# Adding a new .asc file requires ZERO Makefile edits — the lists below are
+# Adding a new .asc file requires ZERO Makefile edits: the lists below are
 # recomputed from the tree on every invocation.
 #
 # EXCEPTION TO THE WILDCARD: entry units. kernel/core/kernel.asc and

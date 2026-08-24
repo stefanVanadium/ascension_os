@@ -1,4 +1,4 @@
-# Ascension — Architecture (living document)
+# Ascension: Architecture (living document)
 
 > Status after Phase 1. This diagram grows as waves land; superseded states move
 > to `docs/journal/`, not deleted.
@@ -7,7 +7,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  DEV MACHINE (host tools — never part of the OS)         │
+│  DEV MACHINE (host tools: never part of the OS)          │
 │                                                          │
 │   ascc  (tools/ascc, Rust + LLVM)                        │
 │   .asc ──lex──parse──typeck──codegen(-Os)──► ELF .o      │
@@ -19,15 +19,15 @@
 │  KERNEL (Asc)                                            │
 │  kernel/libk/                                            │
 │    types.asc    Paddr/Vaddr + conversions (contract→MM)  │
-│    panic.asc    kpanic/kassert — descriptive halt, COM1  │
+│    panic.asc    kpanic/kassert, descriptive halt, COM1   │
 │    spinlock.asc u32-slot locks, xchg test-and-set + IRQ  │
 │    mem.asc      memset/memcpy/memmove/memcmp (LLVM needs)│
 │  kernel/core/kernel.asc                                  │
-│    kmain() -> never — exercises the libk contract        │
+│    kmain() -> never, exercises the libk contract         │
 │  kernel/core/kernel_selftest.asc                         │
-│    selftest ISO entry — fires KASSERT(false) on purpose  │
+│    selftest ISO entry, fires KASSERT(false) on purpose   │
 ├──────────────────────────────────────────────────────────┤
-│  BOOTSTRAP (NASM — irreducible list)                     │
+│  BOOTSTRAP (NASM, irreducible list)                      │
 │  boot/boot.asm                                           │
 │    Multiboot2 header · magic check · static page tables  │
 │    PAE → LME → PG → far jump → higher-half → kmain       │
