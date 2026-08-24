@@ -208,7 +208,7 @@ It's the kind of project that takes 10 years, not one semester. That's the ceili
 
 ## FUTURE-PROOFING: built for what's coming
 
-> A serious OS designed today has to answer two extra questions: what happens when AI agents become first-class software, and whether it can ever run the applications people already have. Both answers flow from the same source: capabilities and typed channels are exactly the primitives these futures need.
+> A serious OS designed today has to answer three extra questions: what happens when AI agents become first-class software, whether it can ever run the applications people already have, and what the hardware below us is doing while we run. The first two flow from capabilities and typed channels directly; the third is the same philosophy pointed one layer down, at the silicon.
 
 ### AI-native by construction, not by integration
 
@@ -250,3 +250,18 @@ Two observations that work in Ascension's favor:
 Known architectural tensions, stated honestly: `fork()` needs defined capability-table derive rules, and syscalls crossing into the userspace personality pay the IPC latency, exactly the number QA already tracks (the seL4 few-hundred-cycles bar).
 
 **Promise order:** native-first → POSIX personality (Linux binaries) → VM seamlessness → Win32 as a community bonus. Every step shippable on its own; the dream stays the north star without blocking the kernel.
+
+### Hardware transparency: see everything below us
+
+A no-bloat OS still boots into a machine crawling with computers we did not start and cannot see. The honest inventory, from the top down: SMM code running on our own CPU at a privilege level below the kernel, entered on SMIs and invisible to any OS; Intel ME and AMD PSP, separate processors inside the chipset with their own operating systems (the ME famously runs MINIX) and DMA access to all of RAM; UEFI runtime services and DXE drivers that survive the bootloader; BMCs on server boards; firmware in every NIC, GPU and SSD. "Zero bloat" in our source tree does not clean any of that up.
+
+The design answer is not paranoia, it is measurement plus fencing, both of which the capability model gives us almost for free:
+
+- IOMMU as physical zero ambient authority: VT-d / AMD-Vi lets the kernel deny DMA by default for every PCIe device. Nothing touches RAM without an explicit capability granting its range. A device (or whatever drives it from below) that reads where it should not produces logged faults instead of silent exfiltration. This turns the security model from a software convention into a hardware-enforced fact.
+- Measure the invisible: the SMI counter MSR on Intel CPUs tells us how often something at ring -2 runs while we work; comparing TSC against the PIT exposes time gaps where hidden execution happened; firmware-reserved memory regions, option ROMs and odd PCI devices get enumerated and reported, never silently trusted.
+- objfs makes "I want to see everything" literal: the whole inventory becomes typed objects (/hw/smi/count, /hw/reserved, /hw/pci, /hw/iommu/domains). Inspection is a namespace walk, not a debugging session.
+- Shrink the SMM surface we can control: several SMIs exist to serve legacy paths (USB emulation, APM). We simply keep those paths off.
+
+Stated honestly, what we cannot do from inside the OS: stop the ME, PSP or BMC. They execute on separate processors below anything our kernel controls. Neutralizing them happens at flash level with host-side tooling in the me_cleaner tradition, documented as part of the recommended boot flow rather than pretended away. Real assurance ends at open silicon; until then Ascension's promise is narrower but real: nothing below you moves through the system without leaving evidence, and nothing beside you touches memory without permission.
+
+Roadmap slot: PCI enumeration arrives with the DRV wave and reserved-region awareness with MM, so the dedicated transparency sprint lands right after PROC, once syscalls and objfs exist to expose the findings.
