@@ -125,23 +125,27 @@ impl Parser {
             self.advance();
             self.expect(TokKind::LBracket, "`[` after `#`")?;
             match self.advance() {
-                Token { kind: TokKind::Ident(ref n), span }
-                    if n == "packed" =>
-                {
+                // `packed` is a keyword token, not an identifier: the
+                // Ident arm here could never fire and #[packed] was dead
+                Token { kind: TokKind::Packed, span } => {
                     packed = true;
                     let _ = span;
                 }
                 t => return self.err(format!("unknown attribute `{}` (only #[packed] exists in v0)", t.kind)),
             }
             self.expect(TokKind::RBracket, "`]` to close attribute")?;
+            if !matches!(self.peek().map(|t| t.kind.clone()), Some(TokKind::Struct)) {
+                return self.err("`#[packed]` applies only to structs");
+            }
         }
 
         match self.peek().map(|t| t.kind.clone()) {
             Some(TokKind::TypeKw) => self.parse_type_alias(),
             Some(TokKind::Struct) => self.parse_struct(packed),
             Some(TokKind::Const) => self.parse_const(),
+            Some(TokKind::Let) => self.parse_static(),
             Some(TokKind::Fn) => self.parse_function(),
-            Some(other) => self.err(format!("expected declaration (`fn`, `const`, `type`, `struct`), found {}", other)),
+            Some(other) => self.err(format!("expected declaration (`fn`, `const`, `let`, `type`, `struct`), found {}", other)),
             None => self.err("expected declaration"),
         }
     }
@@ -209,6 +213,27 @@ impl Parser {
             span: name.1,
             ty,
             init,
+        })
+    }
+
+    /// Module-level binding: `let name: T;` — annotation required (there is
+    /// no initializer to infer from), initializer forbidden (zero-initialized).
+    fn parse_static(&mut self) -> PResult<Decl> {
+        self.advance(); // `let`
+        let name = match self.advance() {
+            Token { kind: TokKind::Ident(n), span: s } => (n, s),
+            t => return self.err(format!("expected binding name after `let`, found {}", t.kind)),
+        };
+        self.expect(TokKind::Colon, "`:` after module-level binding name (annotation required)")?;
+        let ty = self.parse_type()?;
+        if self.eat(TokKind::Assign) {
+            return self.err("module-level bindings are zero-initialized; initializers are not allowed");
+        }
+        self.expect(TokKind::Semi, "`;` after module-level binding")?;
+        Ok(Decl::Static {
+            name: name.0,
+            span: name.1,
+            ty,
         })
     }
 

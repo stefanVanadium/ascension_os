@@ -202,6 +202,8 @@ struct Codegen<'a, 'ctx> {
     str_globals: HashMap<String, PointerValue<'ctx>>,
     /// dedup for anonymous string literals: raw bytes → global pointer
     anon_globals: HashMap<Vec<u8>, PointerValue<'ctx>>,
+    /// module-level statics: name → storage (internal linkage, zero-init)
+    statics: HashMap<String, PointerValue<'ctx>>,
     /// current function locals: name → alloca
     locals: HashMap<String, PointerValue<'ctx>>,
     /// current function locals: name → Asc type
@@ -225,6 +227,7 @@ pub fn generate<'a>(
         builder,
         str_globals: HashMap::new(),
         anon_globals: HashMap::new(),
+        statics: HashMap::new(),
         locals: HashMap::new(),
         local_tys: HashMap::new(),
         cur_ret: Ty::Void,
@@ -243,6 +246,13 @@ pub fn generate<'a>(
     for (name, bytes) in str_consts {
         let g = cg.string_global(&bytes);
         cg.str_globals.insert(name, g);
+    }
+
+    // materialize storage for module-level statics before any function body
+    for decl in &cg.checked.module.decls {
+        if let Decl::Static { name, ty, .. } = decl {
+            cg.gen_static(name, ty)?;
+        }
     }
 
     for decl in &cg.checked.module.decls {
@@ -405,6 +415,25 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         ptr
     }
 
+    /// Module-level static storage: zero-initialized (GRUB zeroes .bss for
+    /// memsz > filesz, and LLVM zero-init matches that contract), internal
+    /// linkage so same-named statics in different units never collide —
+    /// cross-unit sharing goes through accessor functions, not data symbols.
+    /// 16-byte alignment: IDT/stacks want it; for scalars it costs only
+    /// padding inside .bss.
+    fn gen_static(&mut self, name: &str, te: &TypeExpr) -> CResult<()> {
+        let ty = self.resolve_te(te)?;
+        let llt = self.llvm_type(&ty)?;
+        let g = self
+            .module
+            .add_global(llt, Some(AddressSpace::default()), &format!("asc.static.{name}"));
+        g.set_initializer(&llt.const_zero());
+        g.set_linkage(Linkage::Internal);
+        g.set_alignment(16);
+        self.statics.insert(name.to_string(), g.as_pointer_value());
+        Ok(())
+    }
+
     // ---- functions ---------------------------------------------------------
 
     fn apply_kernel_attrs(&self, f: FunctionValue<'ctx>) {
@@ -474,9 +503,17 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             None => self.ctx.void_type().fn_type(&param_meta, false),
         };
 
-        let f = self.module.add_function(name, fnty, Some(Linkage::External));
-        self.apply_kernel_attrs(f);
-
+        // A forward call already emitted a declaration for this name; adding a
+        // second function would make LLVM rename the definition (`f.1`) and
+        // the link would fail with an undefined reference. Reuse it.
+        let f = match self.module.get_function(name) {
+            Some(existing) => existing,
+            None => {
+                let f = self.module.add_function(name, fnty, Some(Linkage::External));
+                self.apply_kernel_attrs(f);
+                f
+            }
+        };
         let entry = self.ctx.append_basic_block(f, "entry");
         self.builder.position_at_end(entry);
 
@@ -484,6 +521,15 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         // allocator handles spilling/promotion)
         self.locals.clear();
         self.local_tys.clear();
+        // statics are addressable exactly like locals (load/store/GEP/`&`);
+        // seeded first so a parameter of the same name shadows it, matching
+        // typeck's lookup order
+        for (n, ty) in &self.checked.statics {
+            if let Some(ptr) = self.statics.get(n.as_str()).copied() {
+                self.locals.insert(n.clone(), ptr);
+                self.local_tys.insert(n.clone(), ty.clone());
+            }
+        }
         for (i, p) in params.iter().enumerate() {
             let pty = sig.params[i].clone();
             let llty = self.llvm_type(&pty)?;

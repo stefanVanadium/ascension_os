@@ -1,7 +1,11 @@
-# The Asc Language, spec v1
+# The Asc Language, spec v1.1
 
-> Status: **v1**: extends v0 with multi-unit linking, arrays, address-of,
-> pointer field access, magic source constants, and the size-first kernel profile.
+> Status: **v1.1**: adds module-level statics, implements `#[packed]` end to end
+> (v0/v1 rejected it at parse time: keyword token vs identifier mismatch), and
+> adds `// EXPECT-DEF:` to the test
+> runner. Still in v1 from before: multi-unit linking, arrays, address-of,
+> pointer field access, magic source constants, and the size-first kernel
+> profile.
 > Scope discipline: capabilities, channels, regions/arenas and modules are
 > **specified here but not implemented yet**; their semantics below are the
 > design contract.
@@ -123,6 +127,12 @@ struct GDTPointer {          // no padding: hardware structs are always packed
 }
 ```
 - Field access via `.`. Structs are Copy in v0.
+- `#[packed]` lowers to an LLVM packed struct type (`<{ ... }>`): fields follow
+  declaration order with no padding, so the C sizeof/offsetof class of bugs
+  cannot appear. Implemented as of v1.1 (before, the attribute was a hard
+  parse error: the lexer emits `packed` as a keyword while the matcher compared
+  identifiers); pinned by `tests/pos/packed_struct.asc` and
+  `tests/neg/packed_on_nonstruct.asc`.
 - Struct types are declared per-file (nominal); two structs with identical fields
   are different types.
 
@@ -134,6 +144,27 @@ const HELLO: *const u8 = "Ascension: hello from Asc\n";
 - Must be initialized with a compile-time-evaluable expression (literals,
   const-to-const references, integer ops of those). No memory is allocated for
   scalar consts; string-literal consts live in `.rodata`.
+
+### Module-level statics (v1.1)
+```
+let tick_counter: u64;         // annotation required, NO initializer
+let gates: [512]u64;           // IDT gate storage, zero-initialized
+let int_stack: [16384]u8;      // 16-byte aligned, unit-private
+```
+- Declared at module level only (`let name: T;`). Storage is zero-initialized
+  and lands in `.bss`. The point is state that must outlive function calls:
+  hardware tables, interrupt stacks, counters reachable from several functions
+  in the unit.
+- The type annotation is required and an initializer is a hard error. Runtime
+  state starts at zero or is written before first read; there is no
+  initialization-order problem to reason about.
+- Unit-private: internal linkage, so same-named statics in different units
+  never collide at link time. Cross-unit sharing happens ONLY through accessor
+  functions (`fn tss_base_addr() -> u64`); ascc emits no extern data symbols.
+- Guaranteed 16-byte alignment regardless of element type (interrupt stacks
+  want it; scalars only pay padding inside `.bss`).
+- Readable/writable from any function in the unit like a local; a parameter of
+  the same name shadows the static.
 
 ## 4. Functions
 
@@ -261,9 +292,8 @@ downgrade to warnings.
 
 generics beyond `Capability<T>`/`chan<T>` · traits/interfaces · enums + match ·
 slices/dynamic arrays · modules & imports (replaces textual type redeclaration) ·
-mutable module-level statics (deliberate: first real consumer is scheduler state,
-must be capability-gated per CLAUDE.md rule 5) · closures · const generics ·
-regions & arena syntax · WCET annotations · self-hosting.
+closures · const generics · regions & arena syntax · WCET annotations ·
+self-hosting.
 
 ## 12. Test suite
 
@@ -271,4 +301,6 @@ regions & arena syntax · WCET annotations · self-hosting.
 `neg/*.asc` must be rejected with a hard error; `run.sh` runs both plus a
 cross-unit link check (`ld -r` + `nm`) and exits nonzero on any surprise.
 `// EXPECT-UNDEF: <sym>` comments in positive files assert symbols the object
-must leave undefined.
+must leave undefined; `// EXPECT-DEF: <sym>` asserts symbols it must DEFINE
+(added in v1.1, catches a forward-referenced definition being renamed by LLVM,
+e.g. to `f.1`).

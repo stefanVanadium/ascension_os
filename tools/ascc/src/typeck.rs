@@ -140,6 +140,8 @@ pub struct CheckedModule<'a> {
     pub named_types: HashMap<String, Ty>,
     pub consts: HashMap<String, ConstInfo>,
     pub fns: HashMap<String, FnSig>,
+    /// module-level mutable bindings: zero-initialized unit-private storage
+    pub statics: HashMap<String, Ty>,
     pub expr_tys: HashMap<usize, Ty>,
 }
 
@@ -152,6 +154,7 @@ struct FnChecker<'a> {
     mt: &'a mut ModuleTypes,
     consts: &'a HashMap<String, ConstInfo>,
     fns: &'a HashMap<String, FnSig>,
+    statics: &'a HashMap<String, Ty>,
     locals: Vec<HashMap<String, Ty>>,
     fn_ret: Ty,
     in_never_fn: bool,
@@ -167,6 +170,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
     };
     let mut consts: HashMap<String, ConstInfo> = HashMap::new();
     let mut fns: HashMap<String, FnSig> = HashMap::new();
+    let mut statics: HashMap<String, Ty> = HashMap::new();
     // which entries in `fns` have a body in this unit (vs. are prototypes)
     let mut defined_fns: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -220,6 +224,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
                 mt: &mut mt,
                 consts: &consts,
                 fns: &fns,
+                statics: &HashMap::new(),
                 locals: vec![HashMap::new()],
                 fn_ret: Ty::Void,
                 in_never_fn: false,
@@ -313,6 +318,25 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
         }
     }
 
+    // Pass 4.5: module-level mutable bindings. Registered AFTER function
+    // signatures so one namespace check can cover consts + fns + statics.
+    for decl in &module.decls {
+        if let Decl::Static { name, span, ty } = decl {
+            let sty = resolve_type(&mut mt, ty, &consts)?;
+            validate_value_ty(&sty, *span, "a module-level binding type")?;
+            if consts.contains_key(name) || fns.contains_key(name) {
+                return Err(terr(
+                    *span,
+                    format!("`{}` already declared as a {} in this unit", name,
+                        if consts.contains_key(name) { "const" } else { "function" }),
+                ));
+            }
+            if statics.insert(name.clone(), sty).is_some() {
+                return Err(terr(*span, format!("duplicate module-level binding `{}`", name)));
+            }
+        }
+    }
+
     // Pass 5: function bodies.
     let mut all_expr_tys: HashMap<usize, Ty> = HashMap::new();
     for decl in &module.decls {
@@ -325,6 +349,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
                 mt: &mut mt,
                 consts: &consts,
                 fns: &fns,
+                statics: &statics,
                 locals: vec![HashMap::new()],
                 fn_ret: sig.ret.clone(),
                 in_never_fn: matches!(sig.ret, Ty::Never),
@@ -352,6 +377,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
         named_types: mt.named_types.clone(),
         consts,
         fns,
+        statics,
         expr_tys: all_expr_tys,
     })
 }
@@ -792,6 +818,11 @@ impl<'a> FnChecker<'a> {
                         ConstVal::Str(_) => None,
                     };
                     return Ok((ci.ty.clone(), folded));
+                }
+                if let Some(t) = self.statics.get(name) {
+                    // statics are never compile-time folded: they are runtime
+                    // storage, readable and writable from any function here
+                    return Ok((t.clone(), None));
                 }
                 Err(terr(*span, format!("unknown identifier `{}`", name)))
             }

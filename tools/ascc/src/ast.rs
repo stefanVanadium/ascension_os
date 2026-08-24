@@ -27,6 +27,14 @@ pub enum Decl {
         ty: TypeExpr,
         init: Expr,
     },
+    /// Module-level mutable binding (`let name: T;`): zero-initialized,
+    /// unit-private storage that outlives every function. No initializer:
+    /// runtime state starts at zero or is written before first read.
+    Static {
+        name: String,
+        span: Span,
+        ty: TypeExpr,
+    },
     Function {
         name: String,
         span: Span,

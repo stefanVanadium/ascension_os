@@ -7,7 +7,12 @@
 ;   GRUB2 (BIOS) -> 32-bit protected mode, eax = MB2 boot magic, ebx = info ptr
 ;   _start: verify magic -> static page tables -> PAE -> LME -> PG ->
 ;           far jump to 64-bit (physical target) -> reload GDT virtually ->
-;           serial markers -> call kmain (Asc)
+;           serial markers -> call kmain(mb_magic, mb_info)
+;
+; Handover ABI (SysV): rdi = MB2 boot magic, rsi = MB2 info pointer (phys).
+; The magic is stashed into edi right after verification because every page
+; table load below spends eax; the info pointer needs no stash, nothing
+; between _start and the call writes ebx.
 ;
 ; NOTE: code below 64-bit sections must only use 32-bit registers/instructions;
 ; the serial helpers are split into a 32-bit and a 64-bit variant for that
@@ -83,7 +88,9 @@ _start:
     ; --- verify Multiboot2 boot magic --------------------------------------
     cmp eax, BOOT_MAGIC
     jne .halt
-    mov edi, ebx                              ; preserve multiboot info ptr (phys)
+    mov edi, eax                              ; stash magic in rdi (kmain arg0):
+                                              ; eax is spent on page tables right
+                                              ; below; 32-bit writes zero-extend
 
     ; --- temporary stack (identity-mapped physical address for now) ---------
     mov esp, boot_stack_top - KERNEL_VIRT_BASE
@@ -183,10 +190,11 @@ higher_half:
     mov rsi, boot_msg_high
     call serial_puts64
 
-    ; hand off to Asc. rdi = multiboot2 info pointer (phys), SysV ABI arg 0.
-    ; The Phase 0 contract says kmain() takes no parameters and never returns;
-    ; passing it costs nothing and later phases will want it.
-    mov edi, ebx                              ; zero-extends into rdi
+    ; hand off to Asc: kmain(mb_magic, mb_info), SysV args rdi/rsi.
+    ; rdi has carried the magic since _start, ebx the physical info
+    ; pointer since GRUB (callee-saved, untouched by everything above).
+    ; The identity map keeps that pointer valid until MM owns paging.
+    mov esi, ebx                              ; zero-extends into rsi
 
     call kmain
 

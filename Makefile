@@ -2,7 +2,7 @@
 #
 #   make / make all    -> bootable ascension.iso
 #   make ascc          -> Asc compiler (host tool; Rust + LLVM)
-#   make kernel        -> ALL kernel objects (every kernel/**/*.asc, mirrored under build/)
+#   make kernel        -> ALL kernel objects (every kernel/**/*.{asc,asm}, mirrored under build/)
 #   make link          -> linked higher-half kernel ELF (+ FOOTPRINT size report)
 #   make iso           -> GRUB2 rescue ISO
 #   make run           -> boot in QEMU, serial on stdio
@@ -25,9 +25,10 @@ QEMU_FLAGS := -serial stdio -display none -no-reboot
 
 # --- Kernel sources -> objects -------------------------------------------------
 #
-# Discovery is automatic: every .asc under kernel/ compiles to a mirrored path
-# under build/ (e.g. kernel/libk/types.asc -> build/kernel/libk/types.o).
-# Adding a new .asc file requires ZERO Makefile edits: the lists below are
+# Discovery is automatic: every .asc AND .asm under kernel/ compiles to a
+# mirrored path under build/ (e.g. kernel/libk/types.asc -> build/kernel/libk/types.o,
+# kernel/arch/x86_64/gdt_flush.asm -> build/kernel/arch/x86_64/gdt_flush.o).
+# Adding a new source file requires ZERO Makefile edits: the lists below are
 # recomputed from the tree on every invocation.
 #
 # EXCEPTION TO THE WILDCARD: entry units. kernel/core/kernel.asc and
@@ -36,8 +37,9 @@ QEMU_FLAGS := -serial stdio -display none -no-reboot
 # shared library object set; each image adds back exactly ONE named entry
 # object. No image ever gets its kmain by wildcard accident.
 
-KERNEL_SRCS := $(sort $(shell find kernel -type f -name '*.asc'))
-KERNEL_OBJS := $(patsubst kernel/%.asc,$(BUILD)/kernel/%.o,$(KERNEL_SRCS))
+KERNEL_SRCS := $(sort $(shell find kernel -type f \( -name '*.asc' -o -name '*.asm' \)))
+KERNEL_OBJS := $(patsubst kernel/%.asc,$(BUILD)/kernel/%.o,$(filter %.asc,$(KERNEL_SRCS))) \
+               $(patsubst kernel/%.asm,$(BUILD)/kernel/%.o,$(filter %.asm,$(KERNEL_SRCS)))
 KERNEL_DIRS := $(sort $(dir $(KERNEL_OBJS)))
 
 BOOT_OBJ := $(BUILD)/boot.o
@@ -90,6 +92,9 @@ $(BOOT_OBJ): boot/boot.asm | $(BUILD)
 .SECONDEXPANSION:
 $(BUILD)/kernel/%.o: kernel/%.asc $(ASCC) | $$(dir $$@)
 	$(ASCC) --kernel $< -o $@
+
+$(BUILD)/kernel/%.o: kernel/%.asm | $$(dir $$@)
+	$(NASM) -f elf64 $< -o $@
 
 kernel: $(KERNEL_OBJS)
 

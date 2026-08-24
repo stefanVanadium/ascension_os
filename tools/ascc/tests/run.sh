@@ -25,6 +25,16 @@ for src in pos/*.asc; do
                 ok=0
             fi
         done < <(grep -h '^// EXPECT-UNDEF:' "$src" | sed 's|^// EXPECT-UNDEF:[[:space:]]*||')
+        # EXPECT-DEF lines name symbols the object must DEFINE (catches the
+        # forward-call class of bug: definition renamed to `f.1` by LLVM)
+        while IFS= read -r sym; do
+            [ -z "$sym" ] && continue
+            if ! nm "$TMP/out.o" | grep -q " T $sym\$"; then
+                echo "FAIL(pos) $src: expected defined symbol '$sym', nm says:" >&2
+                nm "$TMP/out.o" | grep -E " T | t " >&2
+                ok=0
+            fi
+        done < <(grep -h '^// EXPECT-DEF:' "$src" | sed 's|^// EXPECT-DEF:[[:space:]]*||')
         if [ "$ok" = 1 ]; then pass=$((pass+1)); else fail=$((fail+1)); fi
     else
         echo "FAIL(pos) $src (should compile):" >&2
