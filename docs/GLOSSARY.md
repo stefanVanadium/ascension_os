@@ -16,3 +16,8 @@ with every phase; entries link to the doc that owns the concept.
 | **LMA / VMA** | Load Memory Address (where GRUB puts bytes) vs Virtual Memory Address (where linked code expects to run). `linker.ld` ties them with `AT(...)`. |
 | **kernel-mode unit** | An `.asc` file compiled with `--kernel`: no red zone, no FPU/SSE target features, size-first codegen level, kernel code model. |
 | **erasure** | Compile-time guarantees (types, and later capabilities/channels) vanish before LLVM IR — zero runtime cost unless a runtime table is genuinely required and measured. |
+| **extern declaration** | Bodyless `fn f(...) -> T;` — an external symbol reference resolved by the linker. Signatures are not checked across units (same trust model as C headers). |
+| **array decay** | A `[N]T` value used where a pointer is expected becomes a pointer to element 0. Codegen emits the address, not an aggregate load. |
+| **spinlock slot** | libk's lock representation: one aligned u32, 0 = free, 1 = held. Acquire is `xchg` test-and-set with a `pause` spin; IRQ variant saves RFLAGS via pushfq, restores via popfq. |
+| **-Os profile** | Kernel-mode size-first optimization: `optsize` attribute on every function + `default<O2>` pass pipeline, vectorization off, MergeFunctions on. |
+| **selftest ISO** | `ascension-selftest.iso` — identical kernel except kmain deliberately fires KASSERT(false); proves the PANIC path end-to-end (serial line + clean halt). |

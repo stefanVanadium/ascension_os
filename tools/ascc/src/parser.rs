@@ -179,7 +179,11 @@ impl Parser {
             self.expect(TokKind::Colon, "`:` after field name")?;
             let fty = self.parse_type()?;
             fields.push(StructField { name: fname, ty: fty });
-            self.expect(TokKind::Comma, "`,` after field (trailing comma allowed)")?;
+            // trailing comma optional — a missing comma must mean `}` next
+            if !self.eat(TokKind::Comma) {
+                self.expect(TokKind::RBrace, "`}` or `,` after field")?;
+                break;
+            }
         }
         Ok(Decl::Struct {
             name: name.0,
@@ -241,6 +245,15 @@ impl Parser {
                 span: name.1,
             }
         };
+        // `{ ... }` = definition; `;` = bodyless extern declaration
+        if self.eat(TokKind::Semi) {
+            return Ok(Decl::FnProto {
+                name: name.0,
+                span: name.1,
+                ret,
+                params,
+            });
+        }
         let body = self.parse_block()?;
         Ok(Decl::Function {
             name: name.0,
@@ -255,6 +268,14 @@ impl Parser {
 
     fn parse_type(&mut self) -> PResult<TypeExpr> {
         let span = self.peek().map(|t| t.span).unwrap_or(Span { line: 0, col: 0 });
+        if self.eat(TokKind::LBracket) {
+            // [N]T — N is a const-evaluable integer expression; parse_expr
+            // stops naturally at `]` (not an operator).
+            let len = self.parse_expr(0)?;
+            self.expect(TokKind::RBracket, "`]` to close array length")?;
+            let elem = Box::new(self.parse_type()?);
+            return Ok(TypeExpr::Array { len: Box::new(len), elem, span });
+        }
         if self.eat(TokKind::Star) {
             // *const T / *volatile T / both — `const` is documentation-only in
             // v0 (no enforcement of writes through it yet)
@@ -533,6 +554,16 @@ impl Parser {
             let inner = self.parse_unary()?;
             return Ok(Expr::Unary {
                 op: UnaryOp::Not,
+                expr: Box::new(inner),
+                span,
+            });
+        }
+        // prefix `&` — binary `&` (BitAnd) is only reachable between operands,
+        // so an Amp in unary position is unambiguously address-of
+        if self.eat(TokKind::Amp) {
+            let inner = self.parse_unary()?;
+            return Ok(Expr::Unary {
+                op: UnaryOp::AddrOf,
                 expr: Box::new(inner),
                 span,
             });

@@ -36,6 +36,12 @@ use inkwell::{AddressSpace, IntPredicate, OptimizationLevel};
 use llvm_sys::core::{
     LLVMGetEnumAttributeKindForName, LLVMGetInlineAsm, LLVMBuildCall2, LLVMBuildGEP2,
 };
+use llvm_sys::transforms::pass_builder::{
+    LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMRunPasses,
+    LLVMPassBuilderOptionsSetLoopInterleaving, LLVMPassBuilderOptionsSetLoopVectorization,
+    LLVMPassBuilderOptionsSetMergeFunctions, LLVMPassBuilderOptionsSetSLPVectorization,
+};
+use llvm_sys::error::{LLVMConsumeError, LLVMGetErrorMessage};
 use llvm_sys::LLVMInlineAsmDialect;
 
 use crate::ast::*;
@@ -81,12 +87,18 @@ pub fn emit_object(
 ) -> CResult<()> {
     let ctx = Context::create();
     let module = generate(&ctx, checked, kernel_mode)?;
+    if kernel_mode && std::env::var("ASCC_SKIP_OPT").is_err() {
+        optimize_kernel(&module)?;
+    }
     finish_and_write(&module, kernel_mode, obj_path)
 }
 
 pub fn emit_ir(checked: &CheckedModule, kernel_mode: bool) -> CResult<String> {
     let ctx = Context::create();
     let module = generate(&ctx, checked, kernel_mode)?;
+    if kernel_mode {
+        optimize_kernel(&module)?;
+    }
     Ok(module
         .print_to_string()
         .to_str()
@@ -94,26 +106,86 @@ pub fn emit_ir(checked: &CheckedModule, kernel_mode: bool) -> CResult<String> {
         .map_err(|_| cerr("invalid UTF-8 in IR"))?)
 }
 
-fn finish_and_write(module: &Module, kernel_mode: bool, obj_path: &std::path::Path) -> CResult<()> {
-    Target::initialize_x86(&InitializationConfig::default());
+/// Size-first optimization for kernel-mode units (true `-Os` semantics).
+///
+/// LLVM 20's C API gained LLVMPassBuilderOptionsSetOptLevel/SetSizeLevel, but
+/// Debian's libLLVM-19 does not export them, so the size level cannot be set
+/// through options here. Equivalent effect, measured in QA:
+///   - `optsize` attribute on every function (inliner/unroller honor it),
+///   - `default<O2>` pipeline with loop/SLP vectorization OFF and
+///     MergeFunctions ON.
+fn optimize_kernel(module: &Module) -> CResult<()> {
+    // optsize on every defined function before the pipeline runs
+    let kind = unsafe {
+        let cname = b"optsize\0";
+        LLVMGetEnumAttributeKindForName(cname.as_ptr().cast(), (cname.len() - 1) as usize)
+    };
+    if kind == 0 {
+        return Err(cerr("optsize attribute kind not found in this LLVM build"));
+    }
+    let attr = module.get_context().create_enum_attribute(kind as u32, 0);
+    for f in module.get_functions() {
+        f.add_attribute(AttributeLoc::Function, attr);
+    }
 
+    let tm = kernel_target_machine()?;
+    unsafe {
+        let opts = LLVMCreatePassBuilderOptions();
+        LLVMPassBuilderOptionsSetLoopInterleaving(opts, 0);
+        LLVMPassBuilderOptionsSetLoopVectorization(opts, 0);
+        LLVMPassBuilderOptionsSetSLPVectorization(opts, 0);
+        LLVMPassBuilderOptionsSetMergeFunctions(opts, 1);
+        let passes = c"default<O2>";
+        let err = LLVMRunPasses(module.as_mut_ptr(), passes.as_ptr(), tm.as_mut_ptr(), opts);
+        LLVMDisposePassBuilderOptions(opts);
+        if !err.is_null() {
+            let msg = LLVMGetErrorMessage(err);
+            let text = std::ffi::CStr::from_ptr(msg).to_string_lossy().into_owned();
+            LLVMConsumeError(err);
+            return Err(cerr(format!("kernel optimization pipeline failed: {text}")));
+        }
+    }
+    Ok(())
+}
+
+/// Kernel-mode target machine: freestanding triple, every vector/FPU feature
+/// disabled, static relocation, kernel code model. Shared by the optimizer
+/// and object emission.
+fn kernel_target_machine() -> CResult<inkwell::targets::TargetMachine> {
+    Target::initialize_x86(&InitializationConfig::default());
     let triple = TargetTriple::create(KERNEL_TRIPLE);
     let target = Target::from_triple(&triple).map_err(|e| cerr(e.to_string()))?;
-
-    let tm = target
+    target
         .create_target_machine(
             &triple,
             "generic",
-            if kernel_mode { KERNEL_FEATURES } else { "" },
-            if kernel_mode {
-                OptimizationLevel::Less
-            } else {
-                OptimizationLevel::None
-            },
+            KERNEL_FEATURES,
+            OptimizationLevel::Default,
             RelocMode::Static,
             CodeModel::Kernel,
         )
-        .ok_or_else(|| cerr("failed to create x86_64 target machine"))?;
+        .ok_or_else(|| cerr("failed to create x86_64 kernel target machine"))
+}
+
+fn finish_and_write(module: &Module, kernel_mode: bool, obj_path: &std::path::Path) -> CResult<()> {
+    let tm = if kernel_mode {
+        // IR is already optimized; codegen level stays Default (-Os parity)
+        kernel_target_machine()?
+    } else {
+        Target::initialize_x86(&InitializationConfig::default());
+        let triple = TargetTriple::create("x86_64-unknown-none-elf");
+        let target = Target::from_triple(&triple).map_err(|e| cerr(e.to_string()))?;
+        target
+            .create_target_machine(
+                &triple,
+                "generic",
+                "",
+                OptimizationLevel::None,
+                RelocMode::Static,
+                CodeModel::Kernel,
+            )
+            .ok_or_else(|| cerr("failed to create x86_64 target machine"))?
+    };
 
     module.verify().map_err(|e| cerr(e.to_string()))?;
     tm.write_to_file(module, FileType::Object, obj_path)
@@ -202,6 +274,19 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             // Distinct types erase to their base — zero-cost by construction.
             Ty::Distinct { base, .. } => self.llvm_type(base)?,
             Ty::Struct(idx) => self.struct_llt(*idx)?,
+            Ty::Array { elem, len } => match self.llvm_type(elem)? {
+                BasicTypeEnum::IntType(t) => t.array_type(*len as u32).into(),
+                BasicTypeEnum::FloatType(_) => {
+                    return Err(cerr("floats cannot appear in Asc code"))
+                }
+                BasicTypeEnum::PointerType(t) => t.array_type(*len as u32).into(),
+                BasicTypeEnum::ArrayType(t) => t.array_type(*len as u32).into(),
+                BasicTypeEnum::StructType(t) => t.array_type(*len as u32).into(),
+                BasicTypeEnum::VectorType(t) => t.array_type(*len as u32).into(),
+                BasicTypeEnum::ScalableVectorType(_) => {
+                    return Err(cerr("scalable vectors cannot appear in Asc code"))
+                }
+            },
             Ty::Void | Ty::Never => {
                 return Err(cerr("void/never have no value representation"))
             }
@@ -259,6 +344,39 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 pointee: Box::new(self.resolve_te(pointee)?),
                 volatile: *volatile,
             }),
+            TypeExpr::Array { len, elem, .. } => Ok(Ty::Array {
+                elem: Box::new(self.resolve_te(elem)?),
+                len: self.eval_const_len(len)?,
+            }),
+        }
+    }
+
+    /// Mirrors typeck's array-length evaluator: literals, char literals,
+    /// integer const references, and `+ - * /` of those.
+    fn eval_const_len(&self, e: &Expr) -> CResult<u64> {
+        match e {
+            Expr::Int(v, _) => Ok(*v),
+            Expr::Char(c, _) => Ok(*c as u64),
+            Expr::Ident(name, _) => match self.checked.consts.get(name) {
+                Some(info) => match info.value {
+                    ConstVal::Int(v) if v >= 0 => Ok(v as u64),
+                    _ => Err(cerr(format!("const `{}` is not a non-negative integer", name))),
+                },
+                None => Err(cerr(format!("unknown const `{}` in array length", name))),
+            },
+            Expr::Binary { op, lhs, rhs, .. } => {
+                let a = self.eval_const_len(lhs)?;
+                let b = self.eval_const_len(rhs)?;
+                match op {
+                    BinOp::Add => a.checked_add(b),
+                    BinOp::Sub => a.checked_sub(b),
+                    BinOp::Mul => a.checked_mul(b),
+                    BinOp::Div if b != 0 => Some(a / b),
+                    _ => None,
+                }
+                .ok_or_else(|| cerr("array length arithmetic overflow/underflow"))
+            }
+            _ => Err(cerr("array length must be a compile-time constant")),
         }
     }
 
@@ -278,6 +396,9 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         g.set_initializer(&arr);
         g.set_constant(true);
         g.set_unnamed_addr(true);
+        // private: string literals are module-local; external linkage would
+        // make same-named globals collide across compilation units
+        g.set_linkage(Linkage::Private);
         g.set_alignment(1);
         let ptr = g.as_pointer_value();
         self.anon_globals.insert(bytes.to_vec(), ptr);
@@ -298,6 +419,34 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         }
         let attr = self.ctx.create_enum_attribute(kind as u32, 0);
         f.add_attribute(AttributeLoc::Function, attr);
+    }
+
+    /// Resolve a callee to a FunctionValue, emitting a declaration (external
+    /// linkage, no body) for bodyless prototypes and forward references.
+    fn get_or_declare_function(
+        &mut self,
+        name: &str,
+        sig: &crate::typeck::FnSig,
+    ) -> CResult<FunctionValue<'ctx>> {
+        if let Some(f) = self.module.get_function(name) {
+            return Ok(f);
+        }
+        let mut param_types = Vec::new();
+        for p in &sig.params {
+            param_types.push(self.llvm_type(p)?);
+        }
+        let param_meta: Vec<BasicMetadataTypeEnum> = param_types.iter().map(|t| (*t).into()).collect();
+        let llvm_ret: Option<BasicTypeEnum> = match &sig.ret {
+            Ty::Void | Ty::Never => None,
+            t => Some(self.llvm_type(t)?),
+        };
+        let fnty: FunctionType<'ctx> = match llvm_ret {
+            Some(r) => r.fn_type(&param_meta, false),
+            None => self.ctx.void_type().fn_type(&param_meta, false),
+        };
+        let f = self.module.add_function(name, fnty, Some(Linkage::External));
+        self.apply_kernel_attrs(f);
+        Ok(f)
     }
 
     fn gen_function(&mut self, name: &str, params: &[Param], body: &Block) -> CResult<()> {
@@ -396,7 +545,12 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 };
                 let alloca = self.builder.build_alloca(llty, name)?;
                 if let Some(e) = init {
-                    if let Some(v) = self.gen_expr(e)? {
+                    // annotated lets decay arrays to pointers here too
+                    let v = match &declared {
+                        Some(d) => self.gen_value_for(e, d)?,
+                        None => self.gen_expr(e)?,
+                    };
+                    if let Some(v) = v {
                         self.builder.build_store(alloca, v)?;
                     }
                 }
@@ -411,7 +565,10 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 Ok(false)
             }
             Stmt::Assign { target, value, .. } => {
-                let v = self.gen_expr(value)?.expect("value assignment with void rhs");
+                let want = self.ty_of_expr(target)?;
+                let v = self
+                    .gen_value_for(value, &want)?
+                    .expect("value assignment with void rhs");
                 match target {
                     Expr::Ident(n, _) => {
                         let slot = *self
@@ -487,8 +644,10 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             }
             Stmt::Return { value, .. } => match value {
                 Some(e) => {
-                    let v = self.gen_expr(e)?.expect("returning void expression");
                     let want = self.cur_ret.clone();
+                    let v = self
+                        .gen_value_for(e, &want)?
+                        .expect("returning void expression");
                     let want_llt = self.llvm_type(&want)?;
                     let cv = self.coerce_value(v, want_llt, &want)?;
                     match cv {
@@ -563,6 +722,19 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         }
     }
 
+    /// Value of `e` coerced for a context expecting `want`: when the context
+    /// wants a pointer and `e` is an array, emit its address (decay) instead
+    /// of loading the whole aggregate.
+    fn gen_value_for(&mut self, e: &Expr, want: &Ty) -> CResult<V<'ctx>> {
+        if let Ty::Pointer { .. } = want {
+            if matches!(self.ty_of_expr(e)?, Ty::Array { .. }) {
+                let p = self.gen_lvalue_addr(e)?;
+                return Ok(Some(p.into()));
+            }
+        }
+        self.gen_expr(e)
+    }
+
     fn gen_bool(&mut self, e: &Expr) -> CResult<IntValue<'ctx>> {
         match self.gen_expr(e)? {
             Some(BasicValueEnum::IntValue(iv))
@@ -581,12 +753,38 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         }
     }
 
+    /// Address of an lvalue: a local, an array/pointer element, or a struct
+    /// field (through a struct local or via pointer auto-deref). Powers `&`,
+    /// array decay, and field/index access on non-pointer bases.
+    fn gen_lvalue_addr(&mut self, e: &Expr) -> CResult<PointerValue<'ctx>> {
+        match e {
+            Expr::Ident(n, _) => Ok(self
+                .locals
+                .get(n)
+                .copied()
+                .ok_or_else(|| cerr(format!("internal: address of unknown local `{}`", n)))?),
+            Expr::Index { base, index, .. } => Ok(self.gen_index_ptr(base, index)?.0),
+            Expr::Field { base, field, .. } => Ok(self.gen_field_ptr(base, field)?.0),
+            other => Err(cerr(format!(
+                "internal: no lvalue address for {}",
+                expr_kind(other)
+            ))),
+        }
+    }
+
     fn gen_index_ptr(
         &mut self,
         base: &Expr,
         index: &Expr,
     ) -> CResult<(PointerValue<'ctx>, Ty)> {
-        let bp = self.gen_pointer(base)?;
+        let base_ty = self.ty_of_expr(base)?;
+        // Array base: GEP into the local's alloca (address of the array, not
+        // a loaded value). Pointer base: load the pointer value, then GEP.
+        let bp = match &base_ty {
+            Ty::Array { .. } => self.gen_lvalue_addr(base)?,
+            Ty::Pointer { .. } | Ty::Distinct { .. } => self.gen_pointer(base)?,
+            ref o => return Err(cerr(format!("cannot index into `{}`", o.display()))),
+        };
         let iv = match self.gen_expr(index)? {
             Some(BasicValueEnum::IntValue(iv)) => iv,
             _ => return Err(cerr("index must be an integer")),
@@ -597,15 +795,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             self.builder
                 .build_int_cast_sign_flag(iv, self.ctx.i64_type(), false, "idx")?
         };
-        let base_ty = self.ty_of_expr(base)?;
-        let pointee_ty = match &base_ty {
-            Ty::Pointer { pointee, .. } => (**pointee).clone(),
-            Ty::Distinct { base: b, .. } => match **b {
-                Ty::Pointer { ref pointee, .. } => (**pointee).clone(),
-                ref o => return Err(cerr(format!("not a pointer: {}", o.display()))),
-            },
-            ref o => return Err(cerr(format!("not a pointer: {}", o.display()))),
-        };
+        let pointee_ty = base_ty.pointee_for_store();
         let elem_llt = self.llvm_type(&pointee_ty)?;
         let mut indices = [idx.as_value_ref()];
         let res = unsafe {
@@ -626,10 +816,48 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         base: &Expr,
         field: &str,
     ) -> CResult<(PointerValue<'ctx>, Ty)> {
+        // `.field` on a struct LOCAL takes its address directly; through a
+        // pointer-to-struct (Go-style auto-deref) it loads the pointer first.
         let sty_idx = match self.ty_of_expr(base)? {
-            Ty::Struct(i) => i,
+            Ty::Struct(i) => {
+                let bp = self.gen_lvalue_addr(base)?;
+                return self.field_gep(bp, i, field);
+            }
+            Ty::Pointer { pointee, .. } => match *pointee {
+                Ty::Struct(i) => i,
+                ref o => {
+                    return Err(cerr(format!(
+                        "field access through pointer to non-struct `{}`",
+                        o.display()
+                    )))
+                }
+            },
+            Ty::Distinct { base: b, name } => match *b {
+                Ty::Pointer { pointee, .. } => match *pointee {
+                    Ty::Struct(i) => i,
+                    ref o => {
+                        return Err(cerr(format!(
+                            "field access through `{}` (pointer to non-struct `{}`)",
+                            name,
+                            o.display()
+                        )))
+                    }
+                },
+                ref o => return Err(cerr(format!("not a pointer: {}", o.display()))),
+            },
             ref o => return Err(cerr(format!("not a struct: {}", o.display()))),
         };
+        let bp = self.gen_pointer(base)?;
+        self.field_gep(bp, sty_idx, field)
+    }
+
+    /// GEP `[0, field_index]` into a struct at address `bp`.
+    fn field_gep(
+        &mut self,
+        bp: PointerValue<'ctx>,
+        sty_idx: usize,
+        field: &str,
+    ) -> CResult<(PointerValue<'ctx>, Ty)> {
         let def = &self.checked.structs[sty_idx];
         let (fty, idx) = def
             .fields
@@ -639,7 +867,6 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             .map(|(i, f)| (f.ty.clone(), i as u32))
             .ok_or_else(|| cerr(format!("no field `{}`", field)))?;
 
-        let bp = self.gen_pointer(base)?;
         let sllt = self.struct_llt(sty_idx)?;
         let i32t = self.ctx.i32_type();
         let z = i32t.const_int(0, false);
@@ -703,6 +930,10 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 }
             }
             Expr::Unary { op, expr, .. } => {
+                // address-of never loads — it produces the lvalue's slot/GEP
+                if *op == UnaryOp::AddrOf {
+                    return Ok(Some(self.gen_lvalue_addr(expr)?.into()));
+                }
                 let v = self
                     .gen_expr(expr)?
                     .expect("unary on void")
@@ -713,15 +944,31 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                         let one = v.get_type().const_int(1, false);
                         Ok(Some(self.builder.build_xor(v, one, "not")?.into()))
                     }
+                    UnaryOp::AddrOf => unreachable!("address-of handled above"),
                 }
             }
             Expr::Binary { op, lhs, rhs, .. } => self.gen_binary(op, lhs, rhs),
             Expr::Cast { expr, ty, .. } => {
                 let src_ty = self.ty_of_expr(expr)?;
                 let dst_ty = self.resolve_te(ty)?;
-                let v = self.gen_expr(expr)?.expect("cast of void");
+                // array source: take the element-0 address, then behave
+                // exactly like a pointer cast from there on
+                let v = if matches!(src_ty, Ty::Array { .. }) {
+                    BasicValueEnum::PointerValue(self.gen_lvalue_addr(expr)?)
+                } else {
+                    self.gen_expr(expr)?.expect("cast of void")
+                };
                 let dst_llt = self.llvm_type(&dst_ty)?;
                 Ok(Some(match (&src_ty, &dst_ty) {
+                    // array → pointer: v is already the element-0 address
+                    (Ty::Array { .. }, _) => self
+                        .builder
+                        .build_pointer_cast(
+                            v.into_pointer_value(),
+                            dst_llt.into_pointer_type(),
+                            "cast.a2p",
+                        )?
+                        .into(),
                     (Ty::Pointer { .. }, Ty::Pointer { .. }) => self
                         .builder
                         .build_pointer_cast(
@@ -771,7 +1018,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 let pointee = base_ptr_ty.pointee_for_store();
                 let llt = self.llvm_type(&pointee)?;
                 let loaded = self.builder.build_load(llt, ptr, "load.elem")?;
-                if matches!(base_ptr_ty, Ty::Pointer { volatile: true, .. }) {
+                if self.ty_of_expr(base)?.is_volatile_base() {
                     self.builder
                         .get_insert_block()
                         .unwrap()
@@ -800,15 +1047,14 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                     .get(callee)
                     .cloned()
                     .ok_or_else(|| cerr(format!("unknown function `{}`", callee)))?;
-                let f = self
-                    .module
-                    .get_function(callee)
-                    .ok_or_else(|| cerr(format!("function `{}` not emitted", callee)))?;
+                let f = self.get_or_declare_function(callee, &sig)?;
 
                 let mut vals: Vec<BasicMetadataValueEnum> = Vec::new();
                 for (i, a) in args.iter().enumerate() {
-                    let v = self.gen_expr(a)?.expect("void argument");
                     let want = sig.params[i].clone();
+                    let v = self
+                        .gen_value_for(a, &want)?
+                        .expect("void argument");
                     let want_llt = self.llvm_type(&want)?;
                     let cv = self.coerce_value(v, want_llt, &want)?;
                     vals.push(cv.into());
@@ -1002,7 +1248,8 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             if c.starts_with('~') {
                 constraints.push(c.clone());
             } else if c == "memory" || c == "cc" {
-                constraints.push(format!("~{c}"));
+                // LLVM constraint syntax braces every clobber: ~{memory}, ~{cc}
+                constraints.push(format!("~{{{c}}}"));
             } else {
                 constraints.push(format!("~{{{c}}}"));
             }
@@ -1107,9 +1354,37 @@ impl Ty {
     fn pointee_for_store(&self) -> Ty {
         match self {
             Ty::Pointer { pointee, .. } => (**pointee).clone(),
+            Ty::Array { elem, .. } => (**elem).clone(),
             Ty::Distinct { base, .. } => base.pointee_for_store(),
             other => other.clone(),
         }
+    }
+
+    /// Whether accesses through this pointer/array-typed base are volatile.
+    fn is_volatile_base(&self) -> bool {
+        match self {
+            Ty::Pointer { volatile, .. } => *volatile,
+            Ty::Distinct { base, .. } => base.is_volatile_base(),
+            _ => false,
+        }
+    }
+}
+
+fn expr_kind(e: &Expr) -> &'static str {
+    match e {
+        Expr::Int(..) => "integer literal",
+        Expr::Char(..) => "char literal",
+        Expr::Str(..) => "string literal",
+        Expr::Bool(..) => "boolean literal",
+        Expr::Call { .. } => "call result",
+        Expr::Cast { .. } => "cast result",
+        Expr::Binary { .. } => "binary expression",
+        Expr::Unary { op, .. } => match op {
+            UnaryOp::AddrOf => "address-of expression",
+            _ => "unary expression",
+        },
+        Expr::Ident(..) => "identifier",
+        Expr::Index { .. } | Expr::Field { .. } => "indexed/field expression",
     }
 }
 

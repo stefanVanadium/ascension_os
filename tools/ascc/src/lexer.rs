@@ -159,7 +159,9 @@ pub struct LexError {
     pub span: Span,
 }
 
-pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
+/// `source` is tokenized with spans relative to itself; `filename` feeds the
+/// `__FILE__` magic constant (the path exactly as given on the command line).
+pub fn lex(source: &str, filename: &str) -> Result<Vec<Token>, LexError> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = source.chars().collect();
     let n = chars.len();
@@ -228,6 +230,16 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
                 "i16" => TokKind::I16,
                 "i32" => TokKind::I32,
                 "i64" => TokKind::I64,
+                // magic constants — expand immediately from lexer state:
+                // __FILE__ is the command-line path, __LINE__ the current line
+                "__FILE__" => {
+                    tokens.push(Token {
+                        kind: TokKind::Str(filename.to_string()),
+                        span: start_span,
+                    });
+                    continue;
+                }
+                "__LINE__" => TokKind::Int(line as u64),
                 _ => TokKind::Ident(word),
             };
             tokens.push(Token { kind, span: start_span });

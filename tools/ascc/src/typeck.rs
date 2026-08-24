@@ -41,6 +41,11 @@ pub enum Ty {
         pointee: Box<Ty>,
         volatile: bool,
     },
+    /// `[N]T` fixed-size value array (v1: no nesting).
+    Array {
+        elem: Box<Ty>,
+        len: u64,
+    },
     Distinct {
         name: String,
         base: Box<Ty>,
@@ -88,6 +93,7 @@ impl Ty {
                 if *volatile { "volatile " } else { "" },
                 pointee.display()
             ),
+            Ty::Array { elem, len } => format!("[{}]{}", len, elem.display()),
             Ty::Distinct { name, .. } => name.clone(),
             Ty::Struct(i) => format!("<struct #{i}>"),
         }
@@ -120,7 +126,7 @@ pub struct ConstInfo {
     pub value: ConstVal,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnSig {
     pub params: Vec<Ty>,
     pub ret: Ty,
@@ -137,7 +143,7 @@ pub struct CheckedModule<'a> {
     pub expr_tys: HashMap<usize, Ty>,
 }
 
-struct ModuleTypes {
+pub struct ModuleTypes {
     named_types: HashMap<String, Ty>,
     structs: Vec<StructDef>,
 }
@@ -161,6 +167,8 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
     };
     let mut consts: HashMap<String, ConstInfo> = HashMap::new();
     let mut fns: HashMap<String, FnSig> = HashMap::new();
+    // which entries in `fns` have a body in this unit (vs. are prototypes)
+    let mut defined_fns: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Pass 1: register type names (aliases resolved immediately; struct shells
     // inserted so pointers/fields can reference any declared type by name).
@@ -170,7 +178,13 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
                 if mt.named_types.contains_key(name) {
                     return Err(terr(*span, format!("duplicate type name `{}`", name)));
                 }
-                let resolved_base = resolve_type(&mut mt, base)?;
+                let resolved_base = resolve_type(&mut mt, base, &consts)?;
+                if matches!(resolved_base, Ty::Array { .. }) {
+                    return Err(terr(
+                        *span,
+                        "`distinct` over an array is not supported in v1",
+                    ));
+                }
                 validate_value_ty(&resolved_base, *span, "the base of a distinct type")?;
                 mt.named_types.insert(
                     name.clone(),
@@ -186,7 +200,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
                 }
                 let idx = mt.structs.len();
                 mt.structs.push(StructDef {
-                    name: String::new(), // filled in pass 2
+                    name: String::new(), // filled in pass 3
                     packed: false,
                     fields: Vec::new(),
                 });
@@ -196,7 +210,28 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
         }
     }
 
-    // Pass 2: resolve struct fields.
+    // Pass 2: const values (before struct fields, so array lengths may name
+    // consts; const initializers depend only on literals and other consts).
+    for decl in &module.decls {
+        if let Decl::Const { name, span, ty, init } = decl {
+            let cty = resolve_type(&mut mt, ty, &consts)?;
+            validate_const_ty(&cty, *span)?;
+            let mut fc = FnChecker {
+                mt: &mut mt,
+                consts: &consts,
+                fns: &fns,
+                locals: vec![HashMap::new()],
+                fn_ret: Ty::Void,
+                in_never_fn: false,
+                expr_tys: HashMap::new(),
+            };
+            let (val, vty) = fc.const_eval(init)?;
+            coerce(cty.clone(), vty.clone(), init)?;
+            consts.insert(name.clone(), ConstInfo { ty: cty, value: val });
+        }
+    }
+
+    // Pass 3: resolve struct fields.
     for decl in &module.decls {
         if let Decl::Struct { name, packed, fields, span } = decl {
             let idx = match mt.named_types.get(name) {
@@ -205,7 +240,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
             };
             let mut resolved = Vec::new();
             for f in fields {
-                let fty = resolve_type(&mut mt, &f.ty)?;
+                let fty = resolve_type(&mut mt, &f.ty, &consts)?;
                 validate_value_ty(&fty, *span, "a field type")?;
                 if resolved.iter().any(|rf: &ResolvedField| rf.name == f.name) {
                     return Err(terr(
@@ -226,52 +261,59 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
         }
     }
 
-    // Pass 3: const values + function signatures.
+    // Pass 4: function signatures — definitions AND bodyless declarations.
+    // A prototype and a definition of the same name must agree exactly; two
+    // definitions or two prototypes are duplicates.
     for decl in &module.decls {
-        match decl {
-            Decl::Const { name, span, ty, init } => {
-                let cty = resolve_type(&mut mt, ty)?;
-                validate_const_ty(&cty, *span)?;
-                let mut fc = FnChecker {
-                    mt: &mut mt,
-                    consts: &consts,
-                    fns: &fns,
-                    locals: vec![HashMap::new()],
-                    fn_ret: Ty::Void,
-                    in_never_fn: false,
-                    expr_tys: HashMap::new(),
-                };
-                let (val, vty) = fc.const_eval(init)?;
-                coerce(cty.clone(), vty.clone(), init)?;
-                consts.insert(name.clone(), ConstInfo { ty: cty, value: val });
+        let (name, span, ret, params, is_def) = match decl {
+            Decl::Function { name, span, ret, params, .. } => (name, span, ret, params, true),
+            Decl::FnProto { name, span, ret, params } => (name, span, ret, params, false),
+            _ => continue,
+        };
+        let rty = resolve_type(&mut mt, ret, &consts)?;
+        if !matches!(rty, Ty::Void | Ty::Never) {
+            validate_value_ty(&rty, *span, "a return type")?;
+        }
+        if matches!(rty, Ty::Array { .. }) {
+            return Err(terr(*span, "arrays cannot be returned by value (pass a pointer)"));
+        }
+        let mut ptys = Vec::new();
+        for p in params {
+            let pty = resolve_type(&mut mt, &p.ty, &consts)?;
+            validate_value_ty(&pty, *span, "a parameter type")?;
+            if matches!(pty, Ty::Array { .. }) {
+                return Err(terr(*span, "arrays cannot be passed by value (pass a pointer)"));
             }
-            Decl::Function { name, span, ret, params, .. } => {
-                let rty = resolve_type(&mut mt, ret)?;
-                if !matches!(rty, Ty::Void | Ty::Never) {
-                    validate_value_ty(&rty, *span, "a return type")?;
-                }
-                let mut ptys = Vec::new();
-                for p in params {
-                    let pty = resolve_type(&mut mt, &p.ty)?;
-                    validate_value_ty(&pty, *span, "a parameter type")?;
-                    ptys.push(pty);
-                }
-                if fns.contains_key(name) {
-                    return Err(terr(*span, format!("duplicate function name `{}`", name)));
-                }
-                fns.insert(
-                    name.clone(),
-                    FnSig {
-                        params: ptys,
-                        ret: rty,
-                    },
-                );
+            ptys.push(pty);
+        }
+        let sig = FnSig { params: ptys, ret: rty };
+        if let Some(existing) = fns.get(name) {
+            if existing != &sig {
+                return Err(terr(
+                    *span,
+                    format!(
+                        "declaration of `{}` conflicts with earlier signature (params `{}`, returns `{}`)",
+                        name,
+                        existing.params.iter().map(|t| t.display()).collect::<Vec<_>>().join(", "),
+                        existing.ret.display()
+                    ),
+                ));
             }
-            _ => {}
+            if is_def && defined_fns.contains(name) {
+                return Err(terr(*span, format!("duplicate function definition `{}`", name)));
+            }
+            if !is_def && !defined_fns.contains(name) {
+                return Err(terr(*span, format!("duplicate declaration of `{}`", name)));
+            }
+        }
+        // a matching entry is kept as-is; new names are inserted
+        fns.entry(name.clone()).or_insert(sig);
+        if is_def {
+            defined_fns.insert(name.clone());
         }
     }
 
-    // Pass 4: function bodies.
+    // Pass 5: function bodies.
     let mut all_expr_tys: HashMap<usize, Ty> = HashMap::new();
     for decl in &module.decls {
         if let Decl::Function { name, params, body, .. } = decl {
@@ -336,6 +378,7 @@ fn validate_value_ty(ty: &Ty, span: Span, what: &str) -> TResult<()> {
             _ => Ok(()),
         },
         Ty::Distinct { base, .. } => validate_value_ty(base, span, what),
+        Ty::Array { elem, .. } => validate_value_ty(elem, span, what),
         _ => Ok(()),
     }
 }
@@ -352,7 +395,11 @@ fn validate_const_ty(ty: &Ty, span: Span) -> TResult<()> {
     }
 }
 
-pub fn resolve_type(mt: &mut ModuleTypes, te: &TypeExpr) -> TResult<Ty> {
+pub fn resolve_type(
+    mt: &mut ModuleTypes,
+    te: &TypeExpr,
+    consts: &HashMap<String, ConstInfo>,
+) -> TResult<Ty> {
     match te {
         TypeExpr::Named { name, span } => {
             let prim = primitive_by_name(name);
@@ -369,7 +416,7 @@ pub fn resolve_type(mt: &mut ModuleTypes, te: &TypeExpr) -> TResult<Ty> {
             volatile,
             span,
         } => {
-            let inner = resolve_type(mt, pointee)?;
+            let inner = resolve_type(mt, pointee, consts)?;
             match inner {
                 Ty::Void | Ty::Never => Err(terr(
                     *span,
@@ -381,6 +428,68 @@ pub fn resolve_type(mt: &mut ModuleTypes, te: &TypeExpr) -> TResult<Ty> {
                 }),
             }
         }
+        TypeExpr::Array { len, elem, span } => {
+            let inner = resolve_type(mt, elem, consts)?;
+            if matches!(inner, Ty::Array { .. }) {
+                return Err(terr(*span, "nested arrays ([N][M]T) are not supported in v1"));
+            }
+            validate_value_ty(&inner, *span, "an array element type")?;
+            let n = eval_array_len(len, consts)?;
+            if n == 0 {
+                return Err(terr(expr_span(len), "array length must be at least 1"));
+            }
+            Ok(Ty::Array {
+                elem: Box::new(inner),
+                len: n,
+            })
+        }
+    }
+}
+
+/// Compile-time array length: integer literals, char literals, const
+/// references of integer type, and `+ - * /` combinations of those.
+fn eval_array_len(expr: &Expr, consts: &HashMap<String, ConstInfo>) -> TResult<u64> {
+    match expr {
+        Expr::Int(v, _) => Ok(*v),
+        Expr::Char(c, _) => Ok(*c as u64),
+        Expr::Ident(name, span) => match consts.get(name) {
+            Some(ConstInfo { value: ConstVal::Int(v), .. }) if *v >= 0 => Ok(*v as u64),
+            Some(_) => Err(terr(
+                *span,
+                format!("const `{}` is not a non-negative integer (array length)", name),
+            )),
+            None => Err(terr(
+                *span,
+                format!("unknown const `{}` in array length", name),
+            )),
+        },
+        Expr::Binary { op, lhs, rhs, span } => {
+            let a = eval_array_len(lhs, consts)?;
+            let b = eval_array_len(rhs, consts)?;
+            let r = match op {
+                BinOp::Add => a.checked_add(b),
+                BinOp::Sub => a.checked_sub(b),
+                BinOp::Mul => a.checked_mul(b),
+                BinOp::Div => {
+                    if b == 0 {
+                        None
+                    } else {
+                        Some(a / b)
+                    }
+                }
+                other => {
+                    return Err(terr(
+                        *span,
+                        format!("operator not allowed in array length: {:?}", other),
+                    ))
+                }
+            };
+            r.ok_or_else(|| terr(*span, "array length arithmetic overflow/underflow"))
+        }
+        other => Err(terr(
+            expr_span(other),
+            "array length must be a compile-time integer constant",
+        )),
     }
 }
 
@@ -426,6 +535,14 @@ fn types_compatible(expected: &Ty, actual: &Ty) -> bool {
 fn coerce(expected: Ty, actual: Ty, value_expr: &Expr) -> TResult<()> {
     if types_compatible(&expected, &actual) {
         return Ok(());
+    }
+    // array decay: a `[N]T` value used where `*T`/`*const T` is expected
+    // decays to a pointer to its first element (codegen emits the address,
+    // not a load)
+    if let (Ty::Pointer { pointee, .. }, Ty::Array { elem, .. }) = (&expected, &actual) {
+        if types_compatible(pointee, elem) {
+            return Ok(());
+        }
     }
     if is_literal(value_expr) && expected.is_integer() && actual.is_integer() {
         // literal narrowing validated against expected width
@@ -505,7 +622,7 @@ impl<'a> FnChecker<'a> {
             Stmt::Let { name, span, ty, init } => {
                 let declared = match ty {
                     Some(te) => {
-                        let t = resolve_type(self.mt, te)?;
+                        let t = resolve_type(self.mt, te, self.consts)?;
                         validate_value_ty(&t, *span, "a variable type")?;
                         Some(t)
                     }
@@ -601,7 +718,7 @@ impl<'a> FnChecker<'a> {
                     (
                         Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::I8 | Ty::I16 | Ty::I32
                         | Ty::I64 | Ty::Bool | Ty::Pointer { .. } | Ty::Distinct { .. }
-                        | Ty::Struct(_),
+                        | Ty::Struct(_) | Ty::Array { .. },
                         Some(e),
                     ) => {
                         let (actual, _) = self.check_expr(e)?;
@@ -699,11 +816,21 @@ impl<'a> FnChecker<'a> {
                         }
                         Ok((t, cv.map(|v| -v)))
                     }
+                    UnaryOp::AddrOf => {
+                        ensure_lvalue(expr)?;
+                        Ok((
+                            Ty::Pointer {
+                                pointee: Box::new(t),
+                                volatile: false,
+                            },
+                            None,
+                        ))
+                    }
                 }
             }
             Expr::Binary { op, lhs, rhs, span } => self.check_binary(op, lhs, rhs, *span),
             Expr::Cast { expr, ty, span } => {
-                let target = resolve_type(self.mt, ty)?;
+                let target = resolve_type(self.mt, ty, self.consts)?;
                 let (src, _) = self.check_expr(expr)?;
                 check_cast(&src, &target, *span)?;
                 Ok((target, None))
@@ -719,35 +846,87 @@ impl<'a> FnChecker<'a> {
                 }
                 match bt {
                     Ty::Pointer { pointee, .. } => Ok((*pointee, None)),
+                    Ty::Array { elem, .. } => Ok((*elem, None)),
                     other => Err(terr(
                         *span,
-                        format!("cannot index into `{}` (only pointers)", other.display()),
+                        format!("cannot index into `{}` (only pointers and arrays)", other.display()),
                     )),
                 }
             }
             Expr::Field { base, field, span } => {
                 let (bt, _) = self.check_expr(base)?;
-                if let Ty::Struct(idx) = bt {
-                    let def = self.mt.structs[idx].clone();
-                    for f in &def.fields {
-                        if &f.name == field {
-                            return Ok((f.ty.clone(), None));
+                // Go-style: `.field` through a pointer-to-struct auto-derefs
+                let struct_ty = match &bt {
+                    Ty::Struct(_) => bt.clone(),
+                    Ty::Pointer { pointee, volatile } => {
+                        if !matches!(**pointee, Ty::Struct(_)) {
+                            return Err(terr(
+                                *span,
+                                format!(
+                                    "cannot access field `.{}` through pointer to non-struct `{}`",
+                                    field,
+                                    pointee.display()
+                                ),
+                            ));
+                        }
+                        Ty::Pointer {
+                            pointee: pointee.clone(),
+                            volatile: *volatile,
                         }
                     }
-                    Err(terr(
-                        *span,
-                        format!("struct `{}` has no field `{}`", def.name, field),
-                    ))
-                } else {
-                    Err(terr(
-                        *span,
-                        format!(
-                            "cannot access field `.{}` on non-struct type `{}`",
-                            field,
-                            bt.display()
-                        ),
-                    ))
+                    Ty::Distinct { base: db, name } => match **db {
+                        Ty::Pointer { ref pointee, .. } => {
+                            if !matches!(**pointee, Ty::Struct(_)) {
+                                return Err(terr(
+                                    *span,
+                                    format!(
+                                        "cannot access field `.{}` through `{}` (pointer to non-struct `{}`)",
+                                        field,
+                                        name,
+                                        pointee.display()
+                                    ),
+                                ));
+                            }
+                            bt.clone()
+                        }
+                        ref o => {
+                            return Err(terr(
+                                *span,
+                                format!("cannot access field `.{}` on distinct type `{}` wrapping `{}`", field, name, o.display()),
+                            ))
+                        }
+                    },
+                    ref o => {
+                        return Err(terr(
+                            *span,
+                            format!(
+                                "cannot access field `.{}` on non-struct type `{}`",
+                                field,
+                                o.display()
+                            ),
+                        ))
+                    }
+                };
+                let idx = match &struct_ty {
+                    Ty::Struct(i) => *i,
+                    Ty::Pointer { pointee, .. } | Ty::Distinct { base: pointee, .. } => {
+                        match **pointee {
+                            Ty::Struct(i) => i,
+                            _ => unreachable!("checked above"),
+                        }
+                    }
+                    _ => unreachable!("checked above"),
+                };
+                let def = self.mt.structs[idx].clone();
+                for f in &def.fields {
+                    if &f.name == field {
+                        return Ok((f.ty.clone(), None));
+                    }
                 }
+                Err(terr(
+                    *span,
+                    format!("struct `{}` has no field `{}`", def.name, field),
+                ))
             }
             Expr::Call { callee, args, span } => self.check_call(callee, args, *span),
         }
@@ -1119,11 +1298,26 @@ fn check_cast(src: &Ty, dst: &Ty, span: Span) -> TResult<()> {
             _ => Err(terr(span, "invalid cast")),
         },
         (false, true) => match src {
-            Ty::Pointer { .. } => Ok(()),
+            Ty::Pointer { .. } | Ty::Array { .. } => Ok(()),
             _ => Err(terr(span, "invalid cast")),
         },
         (false, false) => match (src, dst) {
             (Ty::Pointer { .. }, Ty::Pointer { .. }) => Ok(()),
+            // explicit array decay: `buf as *const u8`
+            (Ty::Array { elem, .. }, Ty::Pointer { pointee, .. }) => {
+                if types_compatible(pointee, elem) {
+                    Ok(())
+                } else {
+                    Err(terr(
+                        span,
+                        format!(
+                            "cannot cast array of `{}` to pointer to `{}`",
+                            elem.display(),
+                            pointee.display()
+                        ),
+                    ))
+                }
+            }
             _ => Err(terr(span, "invalid cast")),
         },
     }
@@ -1163,6 +1357,7 @@ fn expr_text(e: &Expr) -> String {
             match op {
                 UnaryOp::Neg => "-",
                 UnaryOp::Not => "!",
+                UnaryOp::AddrOf => "&",
             },
             expr_text(expr)
         ),
@@ -1214,5 +1409,8 @@ fn typeexpr_name(t: &TypeExpr) -> String {
             if *volatile { "volatile " } else { "" },
             typeexpr_name(pointee)
         ),
+        TypeExpr::Array { len, elem, .. } => {
+            format!("[{}]{}", expr_text(len), typeexpr_name(elem))
+        }
     }
 }

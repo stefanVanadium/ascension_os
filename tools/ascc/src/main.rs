@@ -82,7 +82,7 @@ fn run() -> Result<(), String> {
 
     // lex → parse → typecheck → codegen; any failure is a hard stop with
     // file:line:col. Nothing downgrades to a warning.
-    let tokens = lex(&src).map_err(|LexError { msg, span }| {
+    let tokens = lex(&src, &fname).map_err(|LexError { msg, span }| {
         report("lex", &fname, span, &msg);
         String::new()
     })?;
