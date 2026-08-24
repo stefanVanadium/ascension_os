@@ -280,3 +280,19 @@ The capability model can. Concretely:
 Deliberately chain-agnostic: Solana, Bitcoin and whatever exists next year are all just userspace applications over these primitives. The needed algorithms are small and friendly to a from-scratch language (ed25519 and SHA-512 are the workhorses); the keystore becomes a class of typed objects in objfs (/secrets) with sign-only derivations. Stated honestly at the other end: running chain infrastructure like a Solana validator is out of scope and stays out (those want 128 GB RAM boxes and assume Linux internals throughout); Ascension aims to be the most trustworthy machine in the world to hold keys on, not a node farm.
 
 Roadmap slot: everything above needs processes, syscalls and objfs first, then a network stack, so this lands after the shell wave. The design constraints it imposes (keystore object type, sign-only capability semantics) get pinned down with PROC, before implementation exists.
+
+### Determinism pays twice: replay debugging and chaos testing
+
+Tools like rr on Linux do heroic work precisely because Linux is not deterministic. Here, synchronous IPC over typed channels makes whole-system execution reproducible by construction: stop a process, rewind a few seconds of interactions, resume differently until the bug shows itself. Owning the language extends this into reverse-stepping through Asc source, not just system calls. The same property inverted becomes a standing QA weapon: kill any process at any IPC boundary, deterministically, on every test run. Crash-recovery and supervisor-tree paths get exercised thousands of times before release instead of once by accident in production.
+
+### Sandboxing is the absence of rights
+
+Running an untrusted binary today means choosing between full trust and heavyweight containers or VMs that still leak ambient authority around the edges. In this model, "execute this downloaded program with read-only network access to exactly one host" is a capability bundle written in the same vocabulary as every other permission in the system. There is no sandbox subsystem to escape from, because there was never a wall: the sandbox is simply everything the process cannot name.
+
+### A graphics stack that cannot spy
+
+Terminal comes first, so this lands last, but the design is pinned now: when the graphical stack arrives it inherits the model wholesale. Windows are typed objects; clipboard transfer is a negotiated channel exchange; screenshotting another application's surface or enumerating its windows requires an explicit capability nobody gets by default. Screen-scraping malware and global keyloggers lose their substrate structurally, which no mainstream desktop has managed.
+
+### Local-first sync over owned objects
+
+objfs plus the distributed-capability ceiling give data replication between your own machines the shape of a namespace operation: typed objects synchronize peer-to-peer under explicit grants, with no cloud account and no server in the middle holding a master copy. Files stop being rows in someone else's service and become objects you hold capabilities for, wherever they physically live.
