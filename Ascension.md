@@ -265,3 +265,18 @@ The design answer is not paranoia, it is measurement plus fencing, both of which
 Stated honestly, what we cannot do from inside the OS: stop the ME, PSP or BMC. They execute on separate processors below anything our kernel controls. Neutralizing them happens at flash level with host-side tooling in the me_cleaner tradition, documented as part of the recommended boot flow rather than pretended away. Real assurance ends at open silicon; until then Ascension's promise is narrower but real: nothing below you moves through the system without leaving evidence, and nothing beside you touches memory without permission.
 
 Roadmap slot: PCI enumeration arrives with the DRV wave and reserved-region awareness with MM, so the dedicated transparency sprint lands right after PROC, once syscalls and objfs exist to expose the findings.
+
+### Secure by construction: keys nothing can steal
+
+Blockchain wallets are today's number-one malware target, and the reason is structural. A wallet holds no money at all: funds live as entries in a distributed ledger, and the wallet guards a private key whose possession equals total control over those entries, with no bank to call and no reset button. On mainstream systems that key is bytes in a file or in RAM, readable by anything with enough privilege: a keylogger, a compromised driver, a DMA attack. Whole industries of seed-phrase theft exist because mainstream OSes cannot make a different promise.
+
+The capability model can. Concretely:
+
+- Signing is a capability, never an export right. A wallet process receives the authority to request signatures over a typed channel; it has no path to read, copy or transmit the key material itself. Same shape as the browser that cannot address /home.
+- Keys live in memory fenced by the IOMMU (see hardware transparency above), so even devices operating below the kernel cannot DMA-read them.
+- Deterministic IPC gives the audit story for free: replaying the log answers "what exactly did this process sign, when, with which parameters", verifiable instead of trusted.
+- No ambient paths: no clipboard route, no default export API, nothing reachable that was not explicitly granted.
+
+Deliberately chain-agnostic: Solana, Bitcoin and whatever exists next year are all just userspace applications over these primitives. The needed algorithms are small and friendly to a from-scratch language (ed25519 and SHA-512 are the workhorses); the keystore becomes a class of typed objects in objfs (/secrets) with sign-only derivations. Stated honestly at the other end: running chain infrastructure like a Solana validator is out of scope and stays out (those want 128 GB RAM boxes and assume Linux internals throughout); Ascension aims to be the most trustworthy machine in the world to hold keys on, not a node farm.
+
+Roadmap slot: everything above needs processes, syscalls and objfs first, then a network stack, so this lands after the shell wave. The design constraints it imposes (keystore object type, sign-only capability semantics) get pinned down with PROC, before implementation exists.
