@@ -200,6 +200,8 @@ x = y;                       // assignment (all v0 types are Copy)
 
 if x > 10 { } else { }       // braces mandatory, no truthiness: condition is bool
 while running { }            // braces mandatory
+break;                       // leaves the innermost enclosing loop
+continue;                    // jumps to the next condition test
 
 return;                      // void functions
 return expr;                 // typed functions
@@ -222,6 +224,12 @@ Operators (precedence low→high):
 - Casts: `expr as T` (pointer↔pointer always OK; integer↔integer explicit OK;
   integer↔pointer explicit OK). Also function-call style for distinct types only:
   `Vaddr(u64(p))`.
+- `as` never touches a **distinct** type. `p as u64` where `p: Paddr` is a hard
+  error; unwrap explicitly with `u64(p)`. This is deliberate: the whole kernel
+  address discipline rests on the conversion being visible in the source.
+- `break` and `continue` outside any loop are hard errors, not warnings. A nested
+  `break` leaves the inner loop only; `continue` re-tests the condition rather
+  than falling through the body tail.
 
 ## 6. Inline assembly
 
@@ -244,6 +252,28 @@ OUTPUTS/INPUTS are comma-separated `"constraint"(binding)` pairs, TEMPLATE is a
 string literal passed verbatim (AT&T dialect). Constraints follow LLVM/GCC inline
 asm conventions. Volatile-by-default (side effects must not be optimized away).
 The asm block is a statement; outputs bind to pre-declared locals.
+
+Operands are numbered outputs-first, so `%0` is the first output and the first
+input when there are no outputs. `%N` becomes `$N` on the way to LLVM; anything
+else after `%` passes through untouched, which is how `%eax` and `%cr3` work.
+`%%` is not an escape (there is no C-style mode here), so write `%eax`, not
+`%%eax`.
+
+**A template that writes a register must say so in CLOBBERS.** `rdmsr` puts its
+result in `eax:edx`; a block listing only `"memory"` lets LLVM keep a live value
+in either register across the block and may allocate an input pointer to one of
+them. The kernel's `msr.asc` lists `"eax", "edx", "memory"` for exactly this
+reason, and `cli`/`sti` want `"cc"`.
+
+At most ONE output per block in v0. `rdmsr` needs both halves, so it recovers
+them through a pinned pointer input (`"r"(&halves[0])`) instead of two register
+outputs. A block writing to memory also needs `"memory"`, or LLVM may move the
+write across neighbouring code.
+
+Templates may reference linker-script symbols. `asm { "leaq kernel_end(%rip), %0"
+: "=r"(ret) }` leaves `kernel_end` undefined in the object for `ld` to resolve.
+The AT&T displacement form parses; the bracket form (`lea %0, [rip+sym]`) does
+not.
 
 ## 7. Ownership & moves (design contract, minimal checker lands Wave 1)
 
@@ -304,3 +334,8 @@ cross-unit link check (`ld -r` + `nm`) and exits nonzero on any surprise.
 must leave undefined; `// EXPECT-DEF: <sym>` asserts symbols it must DEFINE
 (added in v1.1, catches a forward-referenced definition being renamed by LLVM,
 e.g. to `f.1`).
+
+Negative cases currently assert only that compilation fails at some stage, which
+is enough to catch a checker that stops firing but not a regression in an
+earlier stage. An `// EXPECT-ERR: <substring>` comment pinning the failing stage
+is the obvious next tightening.

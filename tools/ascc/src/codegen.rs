@@ -28,6 +28,7 @@ use inkwell::targets::{
 use inkwell::types::{
     AsTypeRef, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType,
 };
+use inkwell::basic_block::BasicBlock;
 use inkwell::values::{
     AsValueRef, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
@@ -45,6 +46,7 @@ use llvm_sys::error::{LLVMConsumeError, LLVMGetErrorMessage};
 use llvm_sys::LLVMInlineAsmDialect;
 
 use crate::ast::*;
+use crate::lexer::Span;
 use crate::typeck::{CheckedModule, ConstVal, Ty};
 
 #[derive(Debug)]
@@ -210,6 +212,8 @@ struct Codegen<'a, 'ctx> {
     local_tys: HashMap<String, Ty>,
     /// return type of the function being generated
     cur_ret: Ty,
+    /// enclosing `while` loops, innermost last: (break target, continue target)
+    loops: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
 }
 
 pub fn generate<'a>(
@@ -231,6 +235,7 @@ pub fn generate<'a>(
         locals: HashMap::new(),
         local_tys: HashMap::new(),
         cur_ret: Ty::Void,
+        loops: Vec::new(),
     };
 
     // materialize globals for all string consts up front
@@ -563,6 +568,18 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
         Ok(())
     }
 
+    /// Innermost enclosing loop targets. Type checking already rejects
+    /// `break`/`continue` outside a loop; this is the codegen backstop.
+    fn loop_target(&self, span: Span) -> CResult<(BasicBlock<'ctx>, BasicBlock<'ctx>)> {
+        match self.loops.last() {
+            Some(t) => Ok(*t),
+            None => Err(cerr(&format!(
+                "`break`/`continue` outside of a loop at line {}",
+                span.line
+            ))),
+        }
+    }
+
     /// Generates statements; returns whether control flow is already terminated.
     fn gen_block(&mut self, block: &Block) -> CResult<bool> {
         for stmt in &block.stmts {
@@ -637,6 +654,12 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
             }
             Stmt::Expr(e) => {
                 self.gen_expr(e)?;
+                // a call to a `-> never` function (kpanic) does not come back;
+                // without this the block looks like it falls off its end
+                if self.ty_of_expr(e)? == Ty::Never {
+                    self.builder.build_unreachable()?;
+                    return Ok(true);
+                }
                 Ok(false)
             }
             Stmt::If {
@@ -649,6 +672,7 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 let f = self.current_fn()?;
                 let then_bb = self.ctx.append_basic_block(f, "if.then");
                 let end_bb = self.ctx.append_basic_block(f, "if.end");
+                let has_else = else_body.is_some();
                 let else_bb = else_body
                     .as_ref()
                     .map(|_| self.ctx.append_basic_block(f, "if.else"))
@@ -656,19 +680,30 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 self.builder.build_conditional_branch(c, then_bb, else_bb)?;
 
                 self.builder.position_at_end(then_bb);
-                if !self.gen_block(then_body)? {
+                let then_done = self.gen_block(then_body)?;
+                if !then_done {
                     self.builder.build_unconditional_branch(end_bb)?;
                 }
 
+                let mut else_done = false;
                 if let Some(els) = else_body {
                     self.builder.position_at_end(else_bb);
-                    if !self.gen_block(els)? {
+                    else_done = self.gen_block(els)?;
+                    if !else_done {
                         self.builder.build_unconditional_branch(end_bb)?;
                     }
                 }
 
                 self.builder.position_at_end(end_bb);
-                Ok(false)
+                // both arms returned or broke out: nothing reaches here, but the
+                // block still needs a terminator or the IR is malformed. Only
+                // with an explicit else — without one the missing arm falls
+                // through into this block and the following statements live in it
+                let both_done = has_else && then_done && else_done;
+                if both_done {
+                    self.builder.build_unreachable()?;
+                }
+                Ok(both_done)
             }
             Stmt::While { cond, body, .. } => {
                 let f = self.current_fn()?;
@@ -682,11 +717,27 @@ impl<'a, 'ctx> Codegen<'a, 'ctx> {
                 self.builder.build_conditional_branch(c, body_bb, end_bb)?;
 
                 self.builder.position_at_end(body_bb);
-                self.gen_block(body)?;
-                self.builder.build_unconditional_branch(cond_bb)?;
+                self.loops.push((end_bb, cond_bb));
+                // a `break`/`continue`/`return` inside already emitted the
+                // terminator for this block; adding another would be invalid IR
+                let terminated = self.gen_block(body)?;
+                self.loops.pop();
+                if !terminated {
+                    self.builder.build_unconditional_branch(cond_bb)?;
+                }
 
                 self.builder.position_at_end(end_bb);
                 Ok(false)
+            }
+            Stmt::Break { span } => {
+                let (brk, _) = self.loop_target(*span)?;
+                self.builder.build_unconditional_branch(brk)?;
+                Ok(true)
+            }
+            Stmt::Continue { span } => {
+                let (_, cont) = self.loop_target(*span)?;
+                self.builder.build_unconditional_branch(cont)?;
+                Ok(true)
             }
             Stmt::Return { value, .. } => match value {
                 Some(e) => {

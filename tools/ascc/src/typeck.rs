@@ -158,6 +158,9 @@ struct FnChecker<'a> {
     locals: Vec<HashMap<String, Ty>>,
     fn_ret: Ty,
     in_never_fn: bool,
+    /// nesting depth of enclosing `while` loops; `break`/`continue` are only
+    /// legal inside one
+    loop_depth: u32,
     /// Resolved type per expression node (keyed by node address) so codegen
     /// never re-infers types. The AST is borrowed unchanged downstream.
     expr_tys: HashMap<usize, Ty>,
@@ -228,6 +231,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
                 locals: vec![HashMap::new()],
                 fn_ret: Ty::Void,
                 in_never_fn: false,
+                loop_depth: 0,
                 expr_tys: HashMap::new(),
             };
             let (val, vty) = fc.const_eval(init)?;
@@ -353,6 +357,7 @@ pub fn check(module: &Module) -> TResult<CheckedModule<'_>> {
                 locals: vec![HashMap::new()],
                 fn_ret: sig.ret.clone(),
                 in_never_fn: matches!(sig.ret, Ty::Never),
+                loop_depth: 0,
                 expr_tys: HashMap::new(),
             };
             let top = fc.locals.last_mut().unwrap();
@@ -721,7 +726,21 @@ impl<'a> FnChecker<'a> {
                         format!("`while` condition must be `bool`, found `{}`", ct.display()),
                     ));
                 }
+                self.loop_depth += 1;
                 self.check_block(body)?;
+                self.loop_depth -= 1;
+                Ok(())
+            }
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(terr(*span, "`break` outside of a loop"));
+                }
+                Ok(())
+            }
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(terr(*span, "`continue` outside of a loop"));
+                }
                 Ok(())
             }
             Stmt::Return { value, span } => {

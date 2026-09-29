@@ -112,6 +112,12 @@ pub enum Stmt {
         body: Block,
         span: Span,
     },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
     Return {
         value: Option<Expr>,
         span: Span,

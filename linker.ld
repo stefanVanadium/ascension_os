@@ -18,14 +18,17 @@ SECTIONS {
         *(.multiboot2)                      /* header must be in first 32 KiB */
         *(.text .text.*)
     }
+    kernel_text_end = .;
 
     .rodata : AT(ADDR(.rodata) - KERNEL_VIRT_BASE) {
         *(.rodata .rodata.*)
     }
+    kernel_rodata_end = .;
 
     .data : AT(ADDR(.data) - KERNEL_VIRT_BASE) {
         *(.data .data.*)
     }
+    kernel_data_end = .;                    /* .bss starts here */
 
     .bss : AT(ADDR(.bss) - KERNEL_VIRT_BASE) {
         *(COMMON)

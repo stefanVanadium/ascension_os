@@ -29,6 +29,8 @@
 %define PAGE_HUGE        0x080                ; PS bit: 2 MiB page in PD
 %define PML4_IDX_HIGH    511                  ; 0xFFFFFFFF80000000 >> 39
 %define PDPT_IDX_HIGH    510
+%define PML4_IDX_WINDOW  256                  ; 0xFFFF800000000000 >> 39
+%define PDPT_IDX_WINDOW  0
 
 %define CR4_PAE          (1 << 5)
 %define CR0_PG           (1 << 31)
@@ -125,6 +127,21 @@ _start:
     mov dword [(pd_table_low  - KERNEL_VIRT_BASE) + (1 * 8)], 0x00200000 | PAGE_HUGE | PAGE_PRESENT | PAGE_WRITE
     mov dword [(pd_table_high - KERNEL_VIRT_BASE) + (0 * 8)], 0x00000000 | PAGE_HUGE | PAGE_PRESENT | PAGE_WRITE
     mov dword [(pd_table_high - KERNEL_VIRT_BASE) + (1 * 8)], 0x00200000 | PAGE_HUGE | PAGE_PRESENT | PAGE_WRITE
+
+    ; Physical window (0xFFFF800000000000 -> phys 0, same 4 MiB): MM builds the
+    ; real page tables through phys_to_virt() BEFORE the cr3 switch, so the
+    ; window has to exist while boot.asm's tables still hold CR3. Dropped by
+    ; vmm.asc when it installs its own tables.
+    mov eax, pdpt_table_window - KERNEL_VIRT_BASE
+    or  al, PAGE_PRESENT | PAGE_WRITE
+    mov dword [(pml4_table      - KERNEL_VIRT_BASE) + (PML4_IDX_WINDOW * 8)], eax
+
+    mov eax, pd_table_window - KERNEL_VIRT_BASE
+    or  al, PAGE_PRESENT | PAGE_WRITE
+    mov dword [(pdpt_table_window - KERNEL_VIRT_BASE) + (PDPT_IDX_WINDOW * 8)], eax
+
+    mov dword [(pd_table_window - KERNEL_VIRT_BASE) + (0 * 8)], 0x00000000 | PAGE_HUGE | PAGE_PRESENT | PAGE_WRITE
+    mov dword [(pd_table_window - KERNEL_VIRT_BASE) + (1 * 8)], 0x00200000 | PAGE_HUGE | PAGE_PRESENT | PAGE_WRITE
 
     mov esi, boot_msg_paging - KERNEL_VIRT_BASE
     call serial_puts32
@@ -288,6 +305,8 @@ pdpt_table_low:   resb 4096
 pd_table_low:     resb 4096
 pdpt_table_high:  resb 4096
 pd_table_high:    resb 4096
+pdpt_table_window: resb 4096
+pd_table_window:  resb 4096
 
 align 16
 boot_stack_bottom:

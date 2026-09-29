@@ -402,6 +402,16 @@ impl Parser {
             let body = self.parse_block()?;
             return Ok(Stmt::While { cond, body, span });
         }
+        if self.peek().map(|t| t.kind == TokKind::Break).unwrap_or(false) {
+            self.advance();
+            self.expect(TokKind::Semi, "`;` after `break`")?;
+            return Ok(Stmt::Break { span });
+        }
+        if self.peek().map(|t| t.kind == TokKind::Continue).unwrap_or(false) {
+            self.advance();
+            self.expect(TokKind::Semi, "`;` after `continue`")?;
+            return Ok(Stmt::Continue { span });
+        }
         if self.peek().map(|t| t.kind == TokKind::Asm).unwrap_or(false) {
             return Ok(Stmt::Asm(self.parse_asm()?));
         }
