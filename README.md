@@ -74,22 +74,30 @@ real-time scheduling, lives in [`Ascension.md`](Ascension.md).
 
 ## Status & roadmap
 
-**Early days.** The compiler came first, because nothing else can even be written before it exists:
-the first two phases are done (ascc v1 compiles kernel-mode Asc, and a kernel written in Asc boots
-from GRUB and talks on serial), the rest is in progress:
+**Early days.** The compiler came first, because nothing else can even be written before it exists.
+Four phases are done: ascc v1 compiles kernel-mode Asc, a kernel written in Asc boots from GRUB and
+talks on serial, and memory is real machinery rather than a contract (bitmap PMM, page tables built at
+runtime, a live physical window). The rest is in progress:
 
 ```
-LANG (ascc) → LIBK → BOOT + ARCH → MM → DRV → PROC → FS → SH + BLD → QA → CR → DOCS
+LANG (ascc) → LIBK → BOOT + ARCH → MM → PROC → DRV → FS → SH + BLD → QA → CR → DOCS
 ```
+
+PROC sits before DRV on purpose. A driver is userspace by default in this architecture, and userspace
+does not exist until PROC creates it, so the dependency only runs one way. See
+[MEMORY_MAP.md](docs/MEMORY_MAP.md) for the address space the MM phase produced.
 
 | Wave | Deliverable |
 |---|---|
 | LANG (done) | `ascc` v1: lexer, parser, type checker, LLVM codegen, size-first profile |
 | LIBK (done) | types/panic/spinlock/mem in Asc, exercised from kmain |
-| BOOT / ARCH | long mode done in boot.asm; GDT/TSS, IDT + ISR trampolines, PIC next |
-| MM / PROC | PMM, VMM, arenas · scheduler, typed IPC, capability table |
+| BOOT / ARCH (done) | long mode, GDT/TSS, IDT + 256 ISR trampolines, PIC, PIT tick |
+| MM (done) | bitmap PMM over the multiboot2 map, runtime page tables, phys window, arenas |
+| PROC (next) | scheduler, context switch, syscalls, capability table, userspace address spaces |
+| DRV | VGA text + keyboard as capability-scoped userspace processes |
 | FS / SH | objfs typed namespace · `embers` shell |
-| QA | QEMU boot tests, low-memory configuration, ISO/kernel-size tracking |
+| METAL (separate track) | boot from USB, PCI enumeration, an AHCI storage driver, the unglamorous chipset list |
+| QA | QEMU boot tests, low-memory ladder, ISO/kernel-size tracking |
 
 This is a decade-scale hobby project, done properly or not at all.
 
